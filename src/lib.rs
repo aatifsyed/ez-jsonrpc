@@ -108,21 +108,28 @@ impl Serialize for V2 {
 #[serde(untagged)] // TODO(aatifsyed): manually implement Deserialize for a better error message
 pub enum RequestParameters {
     /// > params MUST be an Array, containing the values in the Server expected order.
-    ByPosition(ByPosition),
+    ByPosition(Vec<Value>),
     /// > params MUST be an Object, with member names that match the Server
     /// > expected parameter names.
     /// > The absence of expected names MAY result in an error being generated.
     /// > The names MUST match exactly, including case, to the method's expected parameters.
-    ByName(ByName),
+    ByName(Map<String, Value>),
 }
 
-/// Positional request parameters.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct ByPosition(pub Vec<Value>);
-
-/// Key-value request parameters.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct ByName(pub Map<String, Value>);
+impl RequestParameters {
+    pub fn len(&self) -> usize {
+        match self {
+            RequestParameters::ByPosition(it) => it.len(),
+            RequestParameters::ByName(it) => it.len(),
+        }
+    }
+    pub fn is_empty(&self) -> bool {
+        match self {
+            RequestParameters::ByPosition(it) => it.is_empty(),
+            RequestParameters::ByName(it) => it.is_empty(),
+        }
+    }
+}
 
 /// See [`Request::id`].
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
