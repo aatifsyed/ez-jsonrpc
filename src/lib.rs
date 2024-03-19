@@ -104,8 +104,7 @@ impl Serialize for V2 {
 
 /// > If present, parameters for the rpc call MUST be provided as a Structured value.
 /// > Either by-position through an Array or by-name through an Object.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[serde(untagged)] // TODO(aatifsyed): manually implement Deserialize for a better error message
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 pub enum RequestParameters {
     /// > params MUST be an Array, containing the values in the Server expected order.
     ByPosition(Vec<Value>),
@@ -114,6 +113,55 @@ pub enum RequestParameters {
     /// > The absence of expected names MAY result in an error being generated.
     /// > The names MUST match exactly, including case, to the method's expected parameters.
     ByName(Map<String, Value>),
+}
+
+impl<'de> Deserialize<'de> for RequestParameters {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct RequestParametersVisitor;
+        impl<'de> Visitor<'de> for RequestParametersVisitor {
+            type Value = RequestParameters;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str(
+                    "an `Array` of by-position paramaters, or an `Object` of by-name parameters",
+                )
+            }
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut values = match map.size_hint() {
+                    Some(it) => Map::with_capacity(it),
+                    None => Map::new(),
+                };
+
+                while let Some((key, value)) = map.next_entry()? {
+                    values.insert(key, value);
+                }
+
+                Ok(RequestParameters::ByName(values))
+            }
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let mut values = match seq.size_hint() {
+                    Some(it) => Vec::with_capacity(it),
+                    None => Vec::new(),
+                };
+
+                while let Some(value) = seq.next_element()? {
+                    values.push(value);
+                }
+
+                Ok(RequestParameters::ByPosition(values))
+            }
+        }
+        deserializer.deserialize_any(RequestParametersVisitor)
+    }
 }
 
 impl RequestParameters {
@@ -416,9 +464,11 @@ impl<'de> Deserialize<'de> for MaybeBatchedRequest {
         D: serde::Deserializer<'de>,
     {
         match Value::deserialize(deserializer)? {
-            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => Err(
-                D::Error::custom("expected a request object, or an array of request objects"),
-            ),
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
+                Err(D::Error::custom(
+                    "expected a singel request object, or an array of batch request objects",
+                ))
+            }
             it @ Value::Array(_) => Ok(Self::Batch(
                 Vec::<Request>::deserialize(it.into_deserializer()).map_err(D::Error::custom)?,
             )),
