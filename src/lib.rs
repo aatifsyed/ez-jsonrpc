@@ -2,7 +2,7 @@
 //!
 //! > When quoted, the specification will appear as blockquoted text, like so.
 
-use std::{borrow::Cow, fmt::Display, ops::RangeInclusive};
+use std::{borrow::Cow, fmt::Display, ops::RangeInclusive, str::FromStr};
 
 use serde::{
     de::{Error as _, Unexpected},
@@ -180,6 +180,14 @@ pub enum Id {
     Number(Number),
     #[default]
     Null,
+}
+
+impl FromStr for Id {
+    type Err = serde_json::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        serde_json::from_str(s)
+    }
 }
 
 /// A `JSON-RPC 2.0` response object.
