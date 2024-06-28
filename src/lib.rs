@@ -6,7 +6,7 @@ use std::{borrow::Cow, fmt::Display, ops::RangeInclusive};
 
 use serde::{
     de::{Error as _, Unexpected},
-    Deserialize, Serialize,
+    Deserialize, Deserializer, Serialize,
 };
 use serde_json::{Map, Number, Value};
 
@@ -34,6 +34,48 @@ pub struct Request {
     pub id: Option<Id>,
 }
 
+impl Request {
+    pub fn is_notification(&self) -> bool {
+        self.id.is_none()
+    }
+    /// Perform straightforward parameter deserialization.
+    pub fn deserialize_params<'de, T>(self) -> serde_json::Result<T>
+    where
+        T: Deserialize<'de>,
+    {
+        struct RequestParametersDeserializer(Option<RequestParameters>);
+
+        impl<'de> Deserializer<'de> for RequestParametersDeserializer {
+            type Error = serde_json::Error;
+
+            fn deserialize_any<V: serde::de::Visitor<'de>>(
+                self,
+                visitor: V,
+            ) -> Result<V::Value, Self::Error> {
+                match self.0 {
+                    Some(RequestParameters::ByName(it)) => {
+                        serde::de::value::MapDeserializer::new(it.into_iter())
+                            .deserialize_any(visitor)
+                    }
+                    Some(RequestParameters::ByPosition(it)) => {
+                        serde::de::value::SeqDeserializer::new(it.into_iter())
+                            .deserialize_any(visitor)
+                    }
+                    None => serde::de::value::UnitDeserializer::new().deserialize_any(visitor),
+                }
+            }
+
+            serde::forward_to_deserialize_any! {
+                bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
+                bytes byte_buf option unit unit_struct newtype_struct seq tuple
+                tuple_struct map struct enum identifier ignored_any
+            }
+        }
+
+        T::deserialize(RequestParametersDeserializer(self.params))
+    }
+}
+
 impl<'de> Deserialize<'de> for Request {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -46,7 +88,7 @@ impl<'de> Deserialize<'de> for Request {
             #[serde(default, deserialize_with = "deserialize_some")]
             params: Option<Option<RequestParameters>>,
             #[serde(default, deserialize_with = "deserialize_some")]
-            pub id: Option<Option<Id>>,
+            id: Option<Option<Id>>,
         }
         let Helper {
             jsonrpc,
@@ -338,6 +380,11 @@ impl<'de> Deserialize<'de> for Error {
     }
 }
 
+#[derive(Serialize, Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(
+    untagged,
+    expecting = "a single response object, or an Array of batched response objects"
+)]
 /// A response to a [`MaybeBatchedRequest`].
 pub enum MaybeBatchedResponse {
     Single(Response),
@@ -348,7 +395,7 @@ pub enum MaybeBatchedResponse {
 #[derive(Serialize, Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(
     untagged,
-    expecting = "a single request object, or an array of batched request objects"
+    expecting = "a single request object, or an Array of batched request objects"
 )]
 pub enum MaybeBatchedRequest {
     Single(Request),
