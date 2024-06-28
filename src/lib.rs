@@ -11,7 +11,7 @@ use serde::{
 use serde_json::{Map, Number, Value};
 
 /// A `JSON-RPC 2.0` request object.
-#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq, Default)]
 pub struct Request {
     /// > A String specifying the version of the JSON-RPC protocol.
     /// > MUST be exactly "2.0".
@@ -173,11 +173,12 @@ impl RequestParameters {
 }
 
 /// See [`Request::id`].
-#[derive(Serialize, Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq, Hash, Deserialize, Default)]
 #[serde(untagged, expecting = "a string, a number, or null")]
 pub enum Id {
     String(String),
     Number(Number),
+    #[default]
     Null,
 }
 
@@ -203,6 +204,16 @@ pub struct Response {
     /// > If there was an error in detecting the id in the Request object
     /// > (e.g. Parse error/Invalid Request), it MUST be Null.
     pub id: Id,
+}
+
+impl Default for Response {
+    fn default() -> Self {
+        Self {
+            jsonrpc: Default::default(),
+            result: Ok(Default::default()),
+            id: Default::default(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -284,7 +295,7 @@ impl<'de> Deserialize<'de> for Response {
 }
 
 /// A `JSON-RPC 2.0` error object.
-#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq, Default)]
 pub struct Error {
     /// > A Number that indicates the error type that occurred.
     /// > This MUST be an integer.
