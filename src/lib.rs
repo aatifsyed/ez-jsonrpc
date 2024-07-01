@@ -2,7 +2,7 @@
 //!
 //! > When quoted, the specification will appear as blockquoted text, like so.
 
-use std::{borrow::Cow, fmt::Display, ops::RangeInclusive, str::FromStr};
+use std::{borrow::Cow, fmt::Display, marker::PhantomData, ops::RangeInclusive, str::FromStr};
 
 use serde::{
     de::{Error as _, Unexpected},
@@ -40,48 +40,90 @@ impl<T> Request<'_, T> {
     }
 }
 
-impl<'a, 'de> Deserialize<'de> for Request<'a> {
+impl<'a, 'de, T> Deserialize<'de> for Request<'a, T>
+where
+    T: Deserialize<'de>,
+{
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         #[derive(Deserialize)]
-        struct Helper<'a> {
+        #[serde(bound = "T: Deserialize<'de>")]
+        struct Helper<'a, T> {
             jsonrpc: V2,
             method: Cow<'a, str>,
+            #[serde(default)]
+            params: MapOrSequence<T>,
             #[serde(default, deserialize_with = "deserialize_some")]
-            params: Option<Option<RequestParameters>>,
-            #[serde(default, deserialize_with = "deserialize_some")]
-            id: Option<Option<Id<'a>>>,
+            id: Option<Id<'a>>,
         }
         let Helper {
             jsonrpc,
             method,
-            params,
+            params: MapOrSequence(params),
             id,
         } = Helper::deserialize(deserializer)?;
         Ok(Self {
             jsonrpc,
             method,
-            params: match params {
-                Some(Some(params)) => Some(params),
-                // Be lenient in what we accept
-                // Some(None) => return Err(D::Error::custom("`params` may not be `null`")),
-                Some(None) => None,
-                None => None,
-            },
-            id: match id {
-                Some(Some(id)) => Some(id),
-                Some(None) => Some(Id::Null),
-                None => None,
-            },
+            params,
+            id,
         })
+    }
+}
+
+struct MapOrSequence<T>(Option<T>);
+impl<T> Default for MapOrSequence<T> {
+    fn default() -> Self {
+        Self(None)
+    }
+}
+impl<'de, T> Deserialize<'de> for MapOrSequence<T>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor<T>(PhantomData<T>);
+
+        impl<'de, T> serde::de::Visitor<'de> for Visitor<T>
+        where
+            T: Deserialize<'de>,
+        {
+            type Value = Option<T>;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str(
+                    "an `Array` of by-position paramaters, or an `Object` of by-name parameters",
+                )
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                map: A,
+            ) -> Result<Self::Value, A::Error> {
+                T::deserialize(serde::de::value::MapAccessDeserializer::new(map)).map(Some)
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                seq: A,
+            ) -> Result<Self::Value, A::Error> {
+                T::deserialize(serde::de::value::SeqAccessDeserializer::new(seq)).map(Some)
+            }
+            fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+                Ok(None)
+            }
+            fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+                Ok(None)
+            }
+        }
+
+        Ok(Self(deserializer.deserialize_any(Visitor(PhantomData))?))
     }
 }
 
 #[test]
 fn request() {
-    do_test(
+    do_test::<Request>(
         Request {
             jsonrpc: V2,
             method: "myMethod".into(),
@@ -93,7 +135,7 @@ fn request() {
             "method": "myMethod",
         }),
     );
-    do_test(
+    do_test::<Request>(
         Request {
             jsonrpc: V2,
             method: "myMethod".into(),
@@ -104,6 +146,36 @@ fn request() {
             "jsonrpc": "2.0",
             "method": "myMethod",
             "id": null
+        }),
+    );
+    do_test::<Request>(
+        Request {
+            jsonrpc: V2,
+            method: "myMethod".into(),
+            params: Some(RequestParameters::ByPosition(vec![Value::Null])),
+            id: None,
+        },
+        json!({
+            "jsonrpc": "2.0",
+            "method": "myMethod",
+            "params": [null]
+        }),
+    );
+    do_test::<Request>(
+        Request {
+            jsonrpc: V2,
+            method: "myMethod".into(),
+            params: Some(RequestParameters::ByName(
+                [(String::from("hello"), Value::Null)].into_iter().collect(),
+            )),
+            id: None,
+        },
+        json!({
+            "jsonrpc": "2.0",
+            "method": "myMethod",
+            "params": {
+                "hello": null
+            }
         }),
     );
 }
@@ -487,6 +559,14 @@ fn do_test<T>(expected: T, json: Value)
 where
     T: PartialEq + core::fmt::Debug + serde::de::DeserializeOwned + Serialize,
 {
-    assert_eq!(expected, serde_json::from_value(json.clone()).unwrap());
-    assert_eq!(serde_json::to_value(expected).unwrap(), json);
+    assert_eq!(
+        expected,
+        serde_json::from_value(json.clone()).unwrap(),
+        "deserialization failed"
+    );
+    assert_eq!(
+        serde_json::to_value(expected).unwrap(),
+        json,
+        "serialization failed"
+    );
 }
