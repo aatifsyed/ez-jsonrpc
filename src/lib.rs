@@ -5,14 +5,15 @@
 use std::{borrow::Cow, fmt::Display, ops::RangeInclusive, str::FromStr};
 
 use serde::{
-    de::{Error as _, Unexpected},
+    de::{self, Error as _, Unexpected},
     Deserialize, Deserializer, Serialize,
 };
 use serde_json::{Map, Number, Value};
+mod maybe_undefined;
 
 /// A `JSON-RPC 2.0` request object.
 #[derive(Serialize, Debug, Clone, PartialEq, Eq, Default)]
-pub struct Request {
+pub struct Request<T = RequestParameters> {
     /// > A String specifying the version of the JSON-RPC protocol.
     /// > MUST be exactly "2.0".
     pub jsonrpc: V2,
@@ -25,7 +26,7 @@ pub struct Request {
     /// > invocation of the method.
     /// > This member MAY be omitted.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub params: Option<RequestParameters>,
+    pub params: Option<T>,
     /// > An identifier established by the Client that MUST contain a String,
     /// > Number, or NULL value if included.
     /// > If it is not included it is assumed to be a notification.
@@ -34,14 +35,17 @@ pub struct Request {
     pub id: Option<Id>,
 }
 
-impl Request {
+impl<T> Request<T> {
     pub fn is_notification(&self) -> bool {
         self.id.is_none()
     }
+}
+
+impl Request {
     /// Perform straightforward parameter deserialization.
-    pub fn deserialize_params<'de, T>(self) -> serde_json::Result<T>
+    pub fn deserialize_params<'de, P>(self) -> serde_json::Result<P>
     where
-        T: Deserialize<'de>,
+        P: Deserialize<'de>,
     {
         struct RequestParametersDeserializer(Option<RequestParameters>);
 
@@ -72,7 +76,7 @@ impl Request {
             }
         }
 
-        T::deserialize(RequestParametersDeserializer(self.params))
+        P::deserialize(RequestParametersDeserializer(self.params))
     }
 }
 
@@ -192,7 +196,7 @@ impl FromStr for Id {
 
 /// A `JSON-RPC 2.0` response object.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Response {
+pub struct Response<T = Value, E = Value> {
     /// > A String specifying the version of the JSON-RPC protocol.
     /// > MUST be exactly "2.0".
     pub jsonrpc: V2,
@@ -206,7 +210,7 @@ pub struct Response {
     /// >
     /// > This member is REQUIRED on error.
     /// > This member MUST NOT exist if there was no error triggered during invocation.
-    pub result: Result<Value, Error>,
+    pub result: Result<T, Error<E>>,
     /// > This member is REQUIRED.
     /// > It MUST be the same as the value of the id member in the Request Object.
     /// > If there was an error in detecting the id in the Request object
@@ -224,15 +228,6 @@ impl Default for Response {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-struct RawResponseDeSer {
-    jsonrpc: V2,
-    #[serde(default, deserialize_with = "deserialize_some")]
-    result: Option<Option<Value>>,
-    #[serde(default)]
-    error: Option<Error>,
-    id: Id,
-}
 /// Distinguish between absent and present but null.
 ///
 /// See <https://github.com/serde-rs/serde/issues/984#issuecomment-314143738>
@@ -244,24 +239,35 @@ where
     Deserialize::deserialize(deserializer).map(Some)
 }
 
-impl Serialize for Response {
+impl<T, E> Serialize for Response<T, E>
+where
+    T: Serialize,
+    E: Serialize,
+{
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
+        #[derive(Serialize)]
+        struct Helper<'a, T, E> {
+            jsonrpc: &'a V2,
+            result: Option<T>,
+            error: Option<E>,
+            id: &'a Id,
+        }
         let Self {
             jsonrpc,
             result,
             id,
-        } = self.clone();
+        } = self;
         let helper = match result {
-            Ok(result) => RawResponseDeSer {
+            Ok(result) => Helper {
                 jsonrpc,
                 result: Some(Some(result)),
                 error: None,
                 id,
             },
-            Err(error) => RawResponseDeSer {
+            Err(error) => Helper {
                 jsonrpc,
                 result: None,
                 error: Some(error),
@@ -272,39 +278,93 @@ impl Serialize for Response {
     }
 }
 
-impl<'de> Deserialize<'de> for Response {
+impl<'de, T, E> Deserialize<'de> for Response<T, E>
+where
+    T: Deserialize<'de>,
+    E: Deserialize<'de>,
+{
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let RawResponseDeSer {
+        use maybe_undefined::MaybeUndefined;
+        #[derive(Deserialize)]
+        #[serde(bound(deserialize = "T: Deserialize<'de>, E: Deserialize<'de>"))]
+        struct Helper<T, E> {
+            jsonrpc: V2,
+            #[serde(default)]
+            result: MaybeUndefined<T>,
+            #[serde(default)]
+            error: MaybeUndefined<Error<E>>,
+            id: Id,
+        }
+        let Helper {
             jsonrpc,
             error,
             result,
             id,
-        } = RawResponseDeSer::deserialize(deserializer)?;
+        } = Helper::deserialize(deserializer)?;
         match (result, error) {
-            (Some(ok), None) => Ok(Response {
+            (MaybeUndefined::Value(ok), MaybeUndefined::Undefined) => Ok(Response {
                 jsonrpc,
-                result: Ok(ok.unwrap_or_default()),
+                result: Ok(ok),
                 id,
             }),
-            (None, Some(err)) => Ok(Response {
+
+            (MaybeUndefined::Undefined, MaybeUndefined::Value(err)) => Ok(Response {
                 jsonrpc,
                 result: Err(err),
                 id,
             }),
-            (Some(_), Some(_)) => Err(D::Error::custom(
+
+            (
+                MaybeUndefined::Value(_) | MaybeUndefined::Null,
+                MaybeUndefined::Value(_) | MaybeUndefined::Null,
+            ) => Err(D::Error::custom(
                 "only ONE of `error` and `result` may be present",
             )),
-            (None, None) => Err(D::Error::custom("must have an `error` or `result` member")),
+            (MaybeUndefined::Undefined, MaybeUndefined::Undefined) => {
+                Err(D::Error::custom("must have an `error` or `result` member"))
+            }
+
+            // we expect these cases to error
+            (MaybeUndefined::Null, MaybeUndefined::Undefined) => Ok(Response {
+                jsonrpc,
+                result: Ok(T::deserialize(serde::de::value::UnitDeserializer::new())?),
+                id,
+            }),
+            (MaybeUndefined::Undefined, MaybeUndefined::Null) => {
+                match Error::<E>::deserialize(serde::de::value::UnitDeserializer::new()) {
+                    Ok(_) => Err(de::Error::custom("deserialization error")),
+                    Err(e) => Err(e),
+                }
+            }
         }
     }
 }
 
+#[test]
+fn test() {
+    use serde_json::json;
+
+    assert_eq!(
+        Response {
+            jsonrpc: V2,
+            result: Ok(Value::Null),
+            id: Id::Null
+        },
+        serde_json::from_value::<Response>(json!({
+            "jsonrpc": "2.0",
+            "result": null,
+            "id": null
+        }))
+        .unwrap(),
+    );
+}
+
 /// A `JSON-RPC 2.0` error object.
-#[derive(Serialize, Debug, Clone, PartialEq, Eq, Default)]
-pub struct Error {
+#[derive(Serialize, Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+pub struct Error<T = Value> {
     /// > A Number that indicates the error type that occurred.
     /// > This MUST be an integer.
     ///
@@ -318,7 +378,7 @@ pub struct Error {
     /// > The value of this member is defined by the Server
     /// > (e.g. detailed error information, nested errors etc.).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub data: Option<Value>,
+    pub data: Option<T>,
 }
 
 macro_rules! error_code_and_ctor {
@@ -367,35 +427,6 @@ impl Error {
             message: message.to_string(),
             data: data.into(),
         }
-    }
-}
-
-impl<'de> Deserialize<'de> for Error {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        struct Helper {
-            code: i64,
-            message: String,
-            #[serde(default, deserialize_with = "deserialize_some")]
-            data: Option<Option<Value>>,
-        }
-        let Helper {
-            code,
-            message,
-            data,
-        } = Helper::deserialize(deserializer)?;
-        Ok(Self {
-            code,
-            message,
-            data: match data {
-                Some(Some(value)) => Some(value),
-                Some(None) => Some(Value::Null),
-                None => None,
-            },
-        })
     }
 }
 
