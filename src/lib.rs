@@ -44,9 +44,23 @@ pub struct Request<'a, T = Value> {
     pub id: Option<Id<'a>>,
 }
 
-impl<T> Request<'_, T> {
+impl<'a, T> Request<'a, T> {
     pub fn is_notification(&self) -> bool {
         self.id.is_none()
+    }
+    pub fn into_owned(self) -> Request<'static, T> {
+        let Self {
+            jsonrpc,
+            method,
+            params,
+            id,
+        } = self;
+        Request {
+            jsonrpc,
+            method: Cow::Owned(method.into_owned()),
+            params: params.map(|it| it.into_owned()),
+            id: id.map(|it| it.into_owned()),
+        }
     }
 }
 
@@ -162,7 +176,7 @@ pub enum RequestParameters<'a, T = Value> {
 
 pub type Map<K, V, S = RandomState> = indexmap::IndexMap<K, V, S>;
 
-impl RequestParameters<'_> {
+impl<'a, T> RequestParameters<'a, T> {
     pub fn len(&self) -> usize {
         match self {
             RequestParameters::ByPosition(it) => it.len(),
@@ -173,6 +187,16 @@ impl RequestParameters<'_> {
         match self {
             RequestParameters::ByPosition(it) => it.is_empty(),
             RequestParameters::ByName(it) => it.is_empty(),
+        }
+    }
+    pub fn into_owned(self) -> RequestParameters<'static, T> {
+        match self {
+            RequestParameters::ByPosition(it) => RequestParameters::ByPosition(it),
+            RequestParameters::ByName(it) => RequestParameters::ByName(
+                it.into_iter()
+                    .map(|(k, v)| (Cow::Owned(k.into_owned()), v))
+                    .collect(),
+            ),
         }
     }
 }
