@@ -84,9 +84,9 @@ where
     T: Deserialize<'de>,
 {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct Visitor<T>(PhantomData<T>);
+        struct MapOrSequenceVisitor<T>(PhantomData<fn() -> T>);
 
-        impl<'de, T> serde::de::Visitor<'de> for Visitor<T>
+        impl<'de, T> serde::de::Visitor<'de> for MapOrSequenceVisitor<T>
         where
             T: Deserialize<'de>,
         {
@@ -117,7 +117,9 @@ where
             }
         }
 
-        Ok(Self(deserializer.deserialize_any(Visitor(PhantomData))?))
+        Ok(Self(
+            deserializer.deserialize_any(MapOrSequenceVisitor(PhantomData))?,
+        ))
     }
 }
 
@@ -152,13 +154,16 @@ fn request() {
         Request {
             jsonrpc: V2,
             method: "myMethod".into(),
-            params: Some(RequestParameters::ByPosition(vec![Value::Null])),
+            params: Some(RequestParameters::ByPosition(vec![
+                Value::Null,
+                Value::String("hello".into()),
+            ])),
             id: None,
         },
         json!({
             "jsonrpc": "2.0",
             "method": "myMethod",
-            "params": [null]
+            "params": [null, Value::from("hello")]
         }),
     );
     do_test::<Request>(
@@ -166,7 +171,12 @@ fn request() {
             jsonrpc: V2,
             method: "myMethod".into(),
             params: Some(RequestParameters::ByName(
-                [(String::from("hello"), Value::Null)].into_iter().collect(),
+                [
+                    (String::from("hello"), Value::Null),
+                    (String::from("world"), Value::from(1)),
+                ]
+                .into_iter()
+                .collect(),
             )),
             id: None,
         },
@@ -174,10 +184,55 @@ fn request() {
             "jsonrpc": "2.0",
             "method": "myMethod",
             "params": {
-                "hello": null
+                "hello": null,
+                "world": 1
             }
         }),
     );
+
+    #[derive(Deserialize, Debug, PartialEq, Serialize)]
+    struct NamedParams {
+        foo: String,
+    }
+
+    do_test::<Request<NamedParams>>(
+        Request {
+            jsonrpc: V2,
+            method: "myMethod".into(),
+            params: Some(NamedParams {
+                foo: "hello".into(),
+            }),
+            id: None,
+        },
+        json!({
+            "jsonrpc": "2.0",
+            "method": "myMethod",
+            "params": {
+                "foo": "hello"
+            }
+        }),
+    );
+
+    do_test::<Request<(String,)>>(
+        Request {
+            jsonrpc: V2,
+            method: "myMethod".into(),
+            params: Some(("hello".into(),)),
+            id: None,
+        },
+        json!({
+            "jsonrpc": "2.0",
+            "method": "myMethod",
+            "params": ["hello"]
+        }),
+    );
+
+    serde_json::from_value::<Request<String>>(json!({
+        "jsonrpc": "2.0",
+        "method": "myMethod",
+        "params": "hello",
+    }))
+    .unwrap_err();
 }
 
 /// A witness of the literal string "2.0"
@@ -428,7 +483,7 @@ where
 }
 
 #[test]
-fn test() {
+fn response() {
     do_test::<Response<(), ()>>(
         Response {
             jsonrpc: V2,
@@ -561,12 +616,12 @@ where
 {
     assert_eq!(
         expected,
-        serde_json::from_value(json.clone()).unwrap(),
-        "deserialization failed"
+        serde_json::from_value(json.clone()).expect("deserialization failed"),
+        "deserialization mismatch"
     );
     assert_eq!(
-        serde_json::to_value(expected).unwrap(),
+        serde_json::to_value(expected).expect("serialization failed"),
         json,
-        "serialization failed"
+        "serialization mismatch"
     );
 }
