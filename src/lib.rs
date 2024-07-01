@@ -183,6 +183,16 @@ impl FromStr for Id<'static> {
     }
 }
 
+impl<'a> Id<'a> {
+    pub fn into_owned(self) -> Id<'static> {
+        match self {
+            Id::String(it) => Id::String(Cow::Owned(it.into_owned())),
+            Id::Number(it) => Id::Number(it),
+            Id::Null => Id::Null,
+        }
+    }
+}
+
 /// A `JSON-RPC 2.0` response object.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Response<'a, T = Value, E = Value> {
@@ -213,6 +223,21 @@ impl<'a> Default for Response<'a> {
             jsonrpc: Default::default(),
             result: Ok(Default::default()),
             id: Default::default(),
+        }
+    }
+}
+
+impl<'a, T, E> Response<'a, T, E> {
+    pub fn into_owned(self) -> Response<'static, T, E> {
+        let Self {
+            jsonrpc,
+            result,
+            id,
+        } = self;
+        Response {
+            jsonrpc,
+            result: result.map_err(Error::into_owned),
+            id: id.into_owned(),
         }
     }
 }
@@ -363,6 +388,21 @@ pub struct Error<'a, T = Value> {
     /// > (e.g. detailed error information, nested errors etc.).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<T>,
+}
+
+impl<'a, T> Error<'a, T> {
+    pub fn into_owned(self) -> Error<'static, T> {
+        let Self {
+            code,
+            message,
+            data,
+        } = self;
+        Error {
+            code,
+            message: Cow::Owned(message.into_owned()),
+            data,
+        }
+    }
 }
 
 macro_rules! error_code_and_ctor {
