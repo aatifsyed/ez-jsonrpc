@@ -2,17 +2,23 @@
 //!
 //! > When quoted, the specification will appear as blockquoted text, like so.
 
-use std::{borrow::Cow, fmt::Display, marker::PhantomData, ops::RangeInclusive, str::FromStr};
+use std::{
+    borrow::Cow,
+    fmt::Display,
+    hash::{Hash, RandomState},
+    ops::RangeInclusive,
+    str::FromStr,
+};
 
 use serde::{
     de::{Error as _, Unexpected},
     Deserialize, Serialize,
 };
-use serde_json::{Map, Number, Value};
+use serde_json::{Number, Value};
 
 /// A `JSON-RPC 2.0` request object.
-#[derive(Serialize, Debug, Clone, PartialEq, Eq, Default)]
-pub struct Request<'a, T = RequestParameters> {
+#[derive(Serialize, Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+pub struct Request<'a, T = Value> {
     /// > A String specifying the version of the JSON-RPC protocol.
     /// > MUST be exactly "2.0".
     pub jsonrpc: V2,
@@ -25,101 +31,22 @@ pub struct Request<'a, T = RequestParameters> {
     /// > invocation of the method.
     /// > This member MAY be omitted.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub params: Option<T>,
+    pub params: Option<RequestParameters<'a, T>>,
     /// > An identifier established by the Client that MUST contain a String,
     /// > Number, or NULL value if included.
     /// > If it is not included it is assumed to be a notification.
     /// > The value SHOULD normally not be Null and Numbers SHOULD NOT contain fractional parts
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_some",
+        default
+    )]
     pub id: Option<Id<'a>>,
 }
 
 impl<T> Request<'_, T> {
     pub fn is_notification(&self) -> bool {
         self.id.is_none()
-    }
-}
-
-impl<'a, 'de, T> Deserialize<'de> for Request<'a, T>
-where
-    T: Deserialize<'de>,
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(bound = "T: Deserialize<'de>")]
-        struct Helper<'a, T> {
-            jsonrpc: V2,
-            method: Cow<'a, str>,
-            #[serde(default)]
-            params: MapOrSequence<T>,
-            #[serde(default, deserialize_with = "deserialize_some")]
-            id: Option<Id<'a>>,
-        }
-        let Helper {
-            jsonrpc,
-            method,
-            params: MapOrSequence(params),
-            id,
-        } = Helper::deserialize(deserializer)?;
-        Ok(Self {
-            jsonrpc,
-            method,
-            params,
-            id,
-        })
-    }
-}
-
-struct MapOrSequence<T>(Option<T>);
-impl<T> Default for MapOrSequence<T> {
-    fn default() -> Self {
-        Self(None)
-    }
-}
-impl<'de, T> Deserialize<'de> for MapOrSequence<T>
-where
-    T: Deserialize<'de>,
-{
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct MapOrSequenceVisitor<T>(PhantomData<fn() -> T>);
-
-        impl<'de, T> serde::de::Visitor<'de> for MapOrSequenceVisitor<T>
-        where
-            T: Deserialize<'de>,
-        {
-            type Value = Option<T>;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str(
-                    "an `Array` of by-position paramaters, or an `Object` of by-name parameters",
-                )
-            }
-            fn visit_map<A: serde::de::MapAccess<'de>>(
-                self,
-                map: A,
-            ) -> Result<Self::Value, A::Error> {
-                T::deserialize(serde::de::value::MapAccessDeserializer::new(map)).map(Some)
-            }
-            fn visit_seq<A: serde::de::SeqAccess<'de>>(
-                self,
-                seq: A,
-            ) -> Result<Self::Value, A::Error> {
-                T::deserialize(serde::de::value::SeqAccessDeserializer::new(seq)).map(Some)
-            }
-            fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
-                Ok(None)
-            }
-            fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
-                Ok(None)
-            }
-        }
-
-        Ok(Self(
-            deserializer.deserialize_any(MapOrSequenceVisitor(PhantomData))?,
-        ))
     }
 }
 
@@ -172,8 +99,8 @@ fn request() {
             method: "myMethod".into(),
             params: Some(RequestParameters::ByName(
                 [
-                    (String::from("hello"), Value::Null),
-                    (String::from("world"), Value::from(1)),
+                    (Cow::Borrowed("hello"), Value::Null),
+                    (Cow::Borrowed("world"), Value::from(1)),
                 ]
                 .into_iter()
                 .collect(),
@@ -189,50 +116,6 @@ fn request() {
             }
         }),
     );
-
-    #[derive(Deserialize, Debug, PartialEq, Serialize)]
-    struct NamedParams {
-        foo: String,
-    }
-
-    do_test::<Request<NamedParams>>(
-        Request {
-            jsonrpc: V2,
-            method: "myMethod".into(),
-            params: Some(NamedParams {
-                foo: "hello".into(),
-            }),
-            id: None,
-        },
-        json!({
-            "jsonrpc": "2.0",
-            "method": "myMethod",
-            "params": {
-                "foo": "hello"
-            }
-        }),
-    );
-
-    do_test::<Request<(String,)>>(
-        Request {
-            jsonrpc: V2,
-            method: "myMethod".into(),
-            params: Some(("hello".into(),)),
-            id: None,
-        },
-        json!({
-            "jsonrpc": "2.0",
-            "method": "myMethod",
-            "params": ["hello"]
-        }),
-    );
-
-    serde_json::from_value::<Request<String>>(json!({
-        "jsonrpc": "2.0",
-        "method": "myMethod",
-        "params": "hello",
-    }))
-    .unwrap_err();
 }
 
 /// A witness of the literal string "2.0"
@@ -267,17 +150,19 @@ impl Serialize for V2 {
     untagged,
     expecting = "an `Array` of by-position paramaters, or an `Object` of by-name parameters"
 )]
-pub enum RequestParameters {
+pub enum RequestParameters<'a, T = Value> {
     /// > params MUST be an Array, containing the values in the Server expected order.
-    ByPosition(Vec<Value>),
+    ByPosition(Vec<T>),
     /// > params MUST be an Object, with member names that match the Server
     /// > expected parameter names.
     /// > The absence of expected names MAY result in an error being generated.
     /// > The names MUST match exactly, including case, to the method's expected parameters.
-    ByName(Map<String, Value>),
+    ByName(Map<Cow<'a, str>, T>),
 }
 
-impl RequestParameters {
+pub type Map<K, V, S = RandomState> = indexmap::IndexMap<K, V, S>;
+
+impl RequestParameters<'_> {
     pub fn len(&self) -> usize {
         match self {
             RequestParameters::ByPosition(it) => it.len(),
