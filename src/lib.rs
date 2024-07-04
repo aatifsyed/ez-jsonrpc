@@ -10,7 +10,7 @@
 
 use std::{
     borrow::Cow,
-    fmt::Display,
+    fmt::{self, Display},
     hash::{Hash, RandomState},
     ops::RangeInclusive,
     str::FromStr,
@@ -98,7 +98,7 @@ where
 }
 
 impl<T> Request<T> {
-    pub fn is_notification(&self) -> bool {
+    pub const fn is_notification(&self) -> bool {
         self.id.is_none()
     }
 }
@@ -269,10 +269,13 @@ pub struct Response<T = Value, E = Value> {
     pub id: Id,
 }
 
-impl Default for Response {
+impl<T> Default for Response<T>
+where
+    T: Default,
+{
     fn default() -> Self {
         Self {
-            result: Ok(Default::default()),
+            result: Ok(T::default()),
             id: Default::default(),
         }
     }
@@ -426,40 +429,73 @@ macro_rules! error_code_and_ctor {
             $const_name:ident / $ctor_name:ident = $number:literal;
         )*
     ) => {
-        $(
-            $(#[doc = $doc])*
-            pub const $const_name: i64 = $number;
-        )*
 
-        $(
-            #[doc = concat!("Convenience method for creating a new error with code [`Self::", stringify!($const_name), "`]")]
-            pub fn $ctor_name(message: impl Display, data: impl Into<Option<Value>>) -> Self {
-                Self::new(Self::$const_name, message, data)
+        impl Error {
+            $(
+                $(#[doc = $doc])*
+                pub const $const_name: i64 = $number;
+            )*
+
+        }
+
+        impl<T> Error<T> {
+
+            $(
+                #[doc = concat!("Convenience method for creating a new error with code [`Self::", stringify!($const_name), "`]")]
+                pub fn $ctor_name(message: impl Display, data: impl Into<Option<T>>) -> Self {
+                    Self::new(Error::$const_name, message, data)
+                }
+            )*
+
+            /// If [`Self::code`] is one of the predefined errors in the spec,
+            /// get its associated error message.
+            pub const fn spec_message(&self) -> Option<&'static str> {
+                match self.code {
+                    $(
+                        Error::$const_name => {
+                            const LIMBS: &[&'static str] = &[
+                                $($doc),*
+                                ];
+                                const LIMB: &str = LIMBS[0];
+                                const MESSAGE: &str = {
+                                    let (_quot, rest) = LIMB.as_bytes().split_at(2);
+                                    match std::str::from_utf8(rest) {
+                                        Ok(it) => it,
+                                        Err(_) => panic!()
+                                    }
+                                };
+                                Some(MESSAGE)
+                            },
+                        )*
+                        _ => None
+                    }
+                }
             }
-        )*
-    };
+        }
+    }
+
+error_code_and_ctor! {
+    /// > Invalid JSON was received by the server.
+    /// > An error occurred on the server while parsing the JSON text.
+    PARSE_ERROR / parse_error = -32700;
+    /// > The JSON sent is not a valid Request object.
+    INVALID_REQUEST / invalid_request = -32600;
+    /// > The method does not exist / is not available.
+    METHOD_NOT_FOUND / method_not_found = -32601;
+    /// > Invalid method parameter(s).
+    INVALID_PARAMS / invalid_params = -32602;
+    /// > Internal JSON-RPC error.
+    INTERNAL_ERROR / internal_error = -32603;
 }
 
 impl Error {
-    error_code_and_ctor! {
-            /// > Invalid JSON was received by the server. An error occurred on the server while parsing the JSON text.
-            PARSE_ERROR / parse_error = -32700;
-            /// > The JSON sent is not a valid Request object.
-            INVALID_REQUEST / invalid_request = -32600;
-            /// > The method does not exist / is not available.
-            METHOD_NOT_FOUND / method_not_found = -32601;
-            /// > Invalid method parameter(s).
-            INVALID_PARAMS / invalid_params = -32602;
-            /// > Internal JSON-RPC error.
-            INTERNAL_ERROR / internal_error = -32603;
-
-    }
-
     /// > Reserved for implementation-defined server-errors.
     pub const SERVER_ERROR_RANGE: RangeInclusive<i64> = -32099..=-32000;
+}
 
+impl<T> Error<T> {
     /// Convenience method for creating a new error.
-    pub fn new(code: i64, message: impl Display, data: impl Into<Option<Value>>) -> Self {
+    pub fn new(code: i64, message: impl Display, data: impl Into<Option<T>>) -> Self {
         Self {
             code,
             message: message.to_string(),
@@ -467,6 +503,18 @@ impl Error {
         }
     }
 }
+
+impl<T> fmt::Display for Error<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("code {}", self.code))?;
+        if let Some(e) = self.spec_message() {
+            f.write_fmt(format_args!(" ({})", e))?
+        };
+        f.write_fmt(format_args!(": {}", self.message))
+    }
+}
+
+impl<T> std::error::Error for Error<T> where T: fmt::Debug {}
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(
