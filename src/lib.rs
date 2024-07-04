@@ -17,11 +17,11 @@ use serde::{
 use serde_json::{Number, Value};
 
 /// A `JSON-RPC 2.0` request object.
-#[derive(Serialize, Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+///
+/// Note that the `"jsonrpc": "2.0"` member is transparently checked during
+/// deserialization, and added during serialization.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Request<T = Value> {
-    /// > A String specifying the version of the JSON-RPC protocol.
-    /// > MUST be exactly "2.0".
-    pub jsonrpc: V2,
     /// > A String containing the name of the method to be invoked.
     /// > Method names that begin with the word rpc followed by a period character
     /// > (U+002E or ASCII 46) are reserved for rpc-internal methods and extensions
@@ -30,18 +30,65 @@ pub struct Request<T = Value> {
     /// > A Structured value that holds the parameter values to be used during the
     /// > invocation of the method.
     /// > This member MAY be omitted.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<RequestParameters<T>>,
     /// > An identifier established by the Client that MUST contain a String,
     /// > Number, or NULL value if included.
     /// > If it is not included it is assumed to be a notification.
     /// > The value SHOULD normally not be Null and Numbers SHOULD NOT contain fractional parts
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_some",
-        default
-    )]
     pub id: Option<Id>,
+}
+
+impl<T> Serialize for Request<T>
+where
+    T: Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        #[derive(Serialize)]
+        struct Serde<'a, T> {
+            jsonrpc: V2,
+            method: &'a str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            params: Option<&'a RequestParameters<T>>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            id: Option<&'a Id>,
+        }
+        let Self { method, params, id } = self;
+        Serde {
+            jsonrpc: V2,
+            method,
+            params: params.as_ref(),
+            id: id.as_ref(),
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de, T> Deserialize<'de> for Request<T>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Serde<T> {
+            #[allow(unused)]
+            jsonrpc: V2,
+            method: String,
+            params: Option<RequestParameters<T>>,
+            #[serde(deserialize_with = "deserialize_some", default)]
+            id: Option<Id>,
+        }
+        Serde::deserialize(deserializer).map(
+            |Serde {
+                 method, params, id, ..
+             }| Request { method, params, id },
+        )
+    }
 }
 
 impl<T> Request<T> {
@@ -54,7 +101,6 @@ impl<T> Request<T> {
 fn request() {
     do_test::<Request>(
         Request {
-            jsonrpc: V2,
             method: "myMethod".into(),
             params: None,
             id: None,
@@ -66,7 +112,6 @@ fn request() {
     );
     do_test::<Request>(
         Request {
-            jsonrpc: V2,
             method: "myMethod".into(),
             params: None,
             id: Some(Id::Null),
@@ -79,7 +124,6 @@ fn request() {
     );
     do_test::<Request>(
         Request {
-            jsonrpc: V2,
             method: "myMethod".into(),
             params: Some(RequestParameters::ByPosition(vec![
                 Value::Null,
@@ -95,7 +139,6 @@ fn request() {
     );
     do_test::<Request>(
         Request {
-            jsonrpc: V2,
             method: "myMethod".into(),
             params: Some(RequestParameters::ByName(
                 [
@@ -118,9 +161,10 @@ fn request() {
     );
 }
 
-/// A witness of the literal string "2.0"
+/// > A String specifying the version of the JSON-RPC protocol.
+/// > MUST be exactly "2.0".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct V2;
+struct V2;
 
 impl<'de> Deserialize<'de> for V2 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -196,11 +240,11 @@ impl FromStr for Id {
 }
 
 /// A `JSON-RPC 2.0` response object.
+///
+/// Note that the `"jsonrpc": "2.0"` member is transparently checked during
+/// deserialization, and added during serialization.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Response<T = Value, E = Value> {
-    /// > A String specifying the version of the JSON-RPC protocol.
-    /// > MUST be exactly "2.0".
-    pub jsonrpc: V2,
     /// > "result":
     /// >
     /// > This member is REQUIRED on success.
@@ -222,30 +266,10 @@ pub struct Response<T = Value, E = Value> {
 impl Default for Response {
     fn default() -> Self {
         Self {
-            jsonrpc: Default::default(),
             result: Ok(Default::default()),
             id: Default::default(),
         }
     }
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(bound(deserialize = "T: Deserialize<'de>, E: Deserialize<'de>"))]
-struct RawResponseDeSer<'a, T, E> {
-    jsonrpc: V2,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_some",
-        skip_serializing_if = "Option::is_none"
-    )]
-    result: Option<Option<T>>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_some",
-        skip_serializing_if = "Option::is_none"
-    )]
-    error: Option<Error<E>>,
-    id: Cow<'a, Id>,
 }
 
 /// Distinguish between absent and present but null.
@@ -268,32 +292,29 @@ where
     where
         S: serde::Serializer,
     {
-        let Self {
-            jsonrpc,
-            result,
-            id,
-        } = self;
+        #[derive(Serialize)]
+        struct Serde<'a, T, E> {
+            jsonrpc: V2,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            result: Option<Option<&'a T>>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            error: Option<&'a Error<E>>,
+            id: &'a Id,
+        }
+        let Self { result, id } = self;
 
         let helper = match result {
-            Ok(result) => RawResponseDeSer {
-                jsonrpc: *jsonrpc,
-                result: Some(Some(result)),
+            Ok(ok) => Serde {
+                jsonrpc: V2,
+                result: Some(Some(ok)),
                 error: None,
-                id: Cow::Borrowed(id),
+                id,
             },
-            Err(Error {
-                code,
-                message,
-                data,
-            }) => RawResponseDeSer {
-                jsonrpc: *jsonrpc,
+            Err(e) => Serde {
+                jsonrpc: V2,
                 result: None,
-                error: Some(Error {
-                    code: *code,
-                    message: message.clone(),
-                    data: data.as_ref(),
-                }),
-                id: Cow::Borrowed(id),
+                error: Some(e),
+                id,
             },
         };
         helper.serialize(serializer)
@@ -309,22 +330,28 @@ where
     where
         D: serde::Deserializer<'de>,
     {
-        let RawResponseDeSer {
-            jsonrpc,
+        #[derive(Deserialize)]
+        #[serde(bound(deserialize = "T: Deserialize<'de>, E: Deserialize<'de>"))]
+        struct Serde<T, E> {
+            #[allow(unused)]
+            jsonrpc: V2,
+            #[serde(default, deserialize_with = "deserialize_some")]
+            result: Option<Option<T>>,
+            #[serde(default, deserialize_with = "deserialize_some")]
+            error: Option<Error<E>>,
+            id: Id,
+        }
+        let Serde {
+            jsonrpc: _,
             error,
             result,
             id,
-        } = RawResponseDeSer::deserialize(deserializer)?;
+        } = Serde::deserialize(deserializer)?;
         match (result, error) {
-            (Some(Some(ok)), None) => Ok(Response {
-                jsonrpc,
-                result: Ok(ok),
-                id: id.into_owned(),
-            }),
+            (Some(Some(ok)), None) => Ok(Response { result: Ok(ok), id }),
             (None, Some(err)) => Ok(Response {
-                jsonrpc,
                 result: Err(err),
-                id: id.into_owned(),
+                id,
             }),
 
             (Some(_), Some(_)) => Err(D::Error::custom(
@@ -334,9 +361,8 @@ where
 
             // we expect this case to error
             (Some(None), None) => Ok(Response {
-                jsonrpc,
                 result: Ok(T::deserialize(serde::de::value::UnitDeserializer::new())?),
-                id: id.into_owned(),
+                id,
             }),
         }
     }
@@ -346,7 +372,6 @@ where
 fn response() {
     do_test::<Response<(), ()>>(
         Response {
-            jsonrpc: V2,
             result: Ok(()),
             id: Id::Null,
         },
@@ -358,7 +383,6 @@ fn response() {
     );
     do_test::<Response>(
         Response {
-            jsonrpc: V2,
             result: Ok(Value::Null),
             id: Id::Null,
         },
