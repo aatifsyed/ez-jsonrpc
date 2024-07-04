@@ -18,7 +18,7 @@ use serde_json::{Number, Value};
 
 /// A `JSON-RPC 2.0` request object.
 #[derive(Serialize, Debug, Clone, PartialEq, Eq, Default, Deserialize)]
-pub struct Request<'a, T = Value> {
+pub struct Request<T = Value> {
     /// > A String specifying the version of the JSON-RPC protocol.
     /// > MUST be exactly "2.0".
     pub jsonrpc: V2,
@@ -26,12 +26,12 @@ pub struct Request<'a, T = Value> {
     /// > Method names that begin with the word rpc followed by a period character
     /// > (U+002E or ASCII 46) are reserved for rpc-internal methods and extensions
     /// > and MUST NOT be used for anything else.
-    pub method: Cow<'a, str>,
+    pub method: String,
     /// > A Structured value that holds the parameter values to be used during the
     /// > invocation of the method.
     /// > This member MAY be omitted.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub params: Option<RequestParameters<'a, T>>,
+    pub params: Option<RequestParameters<T>>,
     /// > An identifier established by the Client that MUST contain a String,
     /// > Number, or NULL value if included.
     /// > If it is not included it is assumed to be a notification.
@@ -41,26 +41,12 @@ pub struct Request<'a, T = Value> {
         deserialize_with = "deserialize_some",
         default
     )]
-    pub id: Option<Id<'a>>,
+    pub id: Option<Id>,
 }
 
-impl<'a, T> Request<'a, T> {
+impl<T> Request<T> {
     pub fn is_notification(&self) -> bool {
         self.id.is_none()
-    }
-    pub fn into_owned(self) -> Request<'static, T> {
-        let Self {
-            jsonrpc,
-            method,
-            params,
-            id,
-        } = self;
-        Request {
-            jsonrpc,
-            method: Cow::Owned(method.into_owned()),
-            params: params.map(|it| it.into_owned()),
-            id: id.map(|it| it.into_owned()),
-        }
     }
 }
 
@@ -113,8 +99,8 @@ fn request() {
             method: "myMethod".into(),
             params: Some(RequestParameters::ByName(
                 [
-                    (Cow::Borrowed("hello"), Value::Null),
-                    (Cow::Borrowed("world"), Value::from(1)),
+                    (String::from("hello"), Value::Null),
+                    (String::from("world"), Value::from(1)),
                 ]
                 .into_iter()
                 .collect(),
@@ -164,19 +150,19 @@ impl Serialize for V2 {
     untagged,
     expecting = "an `Array` of by-position paramaters, or an `Object` of by-name parameters"
 )]
-pub enum RequestParameters<'a, T = Value> {
+pub enum RequestParameters<T = Value> {
     /// > params MUST be an Array, containing the values in the Server expected order.
     ByPosition(Vec<T>),
     /// > params MUST be an Object, with member names that match the Server
     /// > expected parameter names.
     /// > The absence of expected names MAY result in an error being generated.
     /// > The names MUST match exactly, including case, to the method's expected parameters.
-    ByName(Map<Cow<'a, str>, T>),
+    ByName(Map<String, T>),
 }
 
 pub type Map<K, V, S = RandomState> = indexmap::IndexMap<K, V, S>;
 
-impl<'a, T> RequestParameters<'a, T> {
+impl<T> RequestParameters<T> {
     pub fn len(&self) -> usize {
         match self {
             RequestParameters::ByPosition(it) => it.len(),
@@ -189,29 +175,19 @@ impl<'a, T> RequestParameters<'a, T> {
             RequestParameters::ByName(it) => it.is_empty(),
         }
     }
-    pub fn into_owned(self) -> RequestParameters<'static, T> {
-        match self {
-            RequestParameters::ByPosition(it) => RequestParameters::ByPosition(it),
-            RequestParameters::ByName(it) => RequestParameters::ByName(
-                it.into_iter()
-                    .map(|(k, v)| (Cow::Owned(k.into_owned()), v))
-                    .collect(),
-            ),
-        }
-    }
 }
 
 /// See [`Request::id`].
 #[derive(Serialize, Debug, Clone, PartialEq, Eq, Hash, Deserialize, Default)]
 #[serde(untagged, expecting = "a string, a number, or null")]
-pub enum Id<'a> {
-    String(Cow<'a, str>),
+pub enum Id {
+    String(String),
     Number(Number),
     #[default]
     Null,
 }
 
-impl FromStr for Id<'static> {
+impl FromStr for Id {
     type Err = serde_json::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -219,19 +195,9 @@ impl FromStr for Id<'static> {
     }
 }
 
-impl<'a> Id<'a> {
-    pub fn into_owned(self) -> Id<'static> {
-        match self {
-            Id::String(it) => Id::String(Cow::Owned(it.into_owned())),
-            Id::Number(it) => Id::Number(it),
-            Id::Null => Id::Null,
-        }
-    }
-}
-
 /// A `JSON-RPC 2.0` response object.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Response<'a, T = Value, E = Value> {
+pub struct Response<T = Value, E = Value> {
     /// > A String specifying the version of the JSON-RPC protocol.
     /// > MUST be exactly "2.0".
     pub jsonrpc: V2,
@@ -245,35 +211,20 @@ pub struct Response<'a, T = Value, E = Value> {
     /// >
     /// > This member is REQUIRED on error.
     /// > This member MUST NOT exist if there was no error triggered during invocation.
-    pub result: Result<T, Error<'a, E>>,
+    pub result: Result<T, Error<E>>,
     /// > This member is REQUIRED.
     /// > It MUST be the same as the value of the id member in the Request Object.
     /// > If there was an error in detecting the id in the Request object
     /// > (e.g. Parse error/Invalid Request), it MUST be Null.
-    pub id: Id<'a>,
+    pub id: Id,
 }
 
-impl<'a> Default for Response<'a> {
+impl Default for Response {
     fn default() -> Self {
         Self {
             jsonrpc: Default::default(),
             result: Ok(Default::default()),
             id: Default::default(),
-        }
-    }
-}
-
-impl<'a, T, E> Response<'a, T, E> {
-    pub fn into_owned(self) -> Response<'static, T, E> {
-        let Self {
-            jsonrpc,
-            result,
-            id,
-        } = self;
-        Response {
-            jsonrpc,
-            result: result.map_err(Error::into_owned),
-            id: id.into_owned(),
         }
     }
 }
@@ -293,8 +244,8 @@ struct RawResponseDeSer<'a, T, E> {
         deserialize_with = "deserialize_some",
         skip_serializing_if = "Option::is_none"
     )]
-    error: Option<Error<'a, E>>,
-    id: Cow<'a, Id<'a>>,
+    error: Option<Error<E>>,
+    id: Cow<'a, Id>,
 }
 
 /// Distinguish between absent and present but null.
@@ -308,7 +259,7 @@ where
     Deserialize::deserialize(deserializer).map(Some)
 }
 
-impl<'a, T, E> Serialize for Response<'a, T, E>
+impl<T, E> Serialize for Response<T, E>
 where
     T: Serialize,
     E: Serialize,
@@ -339,7 +290,7 @@ where
                 result: None,
                 error: Some(Error {
                     code: *code,
-                    message: Cow::Borrowed(message),
+                    message: message.clone(),
                     data: data.as_ref(),
                 }),
                 id: Cow::Borrowed(id),
@@ -349,7 +300,7 @@ where
     }
 }
 
-impl<'a, 'de, T, E> Deserialize<'de> for Response<'a, T, E>
+impl<'de, T, E> Deserialize<'de> for Response<T, E>
 where
     T: Deserialize<'de>,
     E: Deserialize<'de>,
@@ -405,11 +356,23 @@ fn response() {
             "id": null
         }),
     );
+    do_test::<Response>(
+        Response {
+            jsonrpc: V2,
+            result: Ok(Value::Null),
+            id: Id::Null,
+        },
+        json!({
+            "jsonrpc": "2.0",
+            "result": null,
+            "id": null
+        }),
+    );
 }
 
 /// A `JSON-RPC 2.0` error object.
 #[derive(Serialize, Debug, Clone, PartialEq, Eq, Default, Deserialize)]
-pub struct Error<'a, T = Value> {
+pub struct Error<T = Value> {
     /// > A Number that indicates the error type that occurred.
     /// > This MUST be an integer.
     ///
@@ -417,28 +380,13 @@ pub struct Error<'a, T = Value> {
     pub code: i64,
     /// > A String providing a short description of the error.
     /// > The message SHOULD be limited to a concise single sentence.
-    pub message: Cow<'a, str>,
+    pub message: String,
     /// > A Primitive or Structured value that contains additional information about the error.
     /// > This may be omitted.
     /// > The value of this member is defined by the Server
     /// > (e.g. detailed error information, nested errors etc.).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<T>,
-}
-
-impl<'a, T> Error<'a, T> {
-    pub fn into_owned(self) -> Error<'static, T> {
-        let Self {
-            code,
-            message,
-            data,
-        } = self;
-        Error {
-            code,
-            message: Cow::Owned(message.into_owned()),
-            data,
-        }
-    }
 }
 
 macro_rules! error_code_and_ctor {
@@ -462,7 +410,7 @@ macro_rules! error_code_and_ctor {
     };
 }
 
-impl<'a> Error<'a> {
+impl Error {
     error_code_and_ctor! {
             /// > Invalid JSON was received by the server. An error occurred on the server while parsing the JSON text.
             PARSE_ERROR / parse_error = -32700;
@@ -484,7 +432,7 @@ impl<'a> Error<'a> {
     pub fn new(code: i64, message: impl Display, data: impl Into<Option<Value>>) -> Self {
         Self {
             code,
-            message: message.to_string().into(),
+            message: message.to_string(),
             data: data.into(),
         }
     }
@@ -492,26 +440,24 @@ impl<'a> Error<'a> {
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(
-    bound(deserialize = "'de: 'a"),
     untagged,
     expecting = "a single response object, or an Array of batched response objects"
 )]
 /// A response to a [`MaybeBatchedRequest`].
-pub enum MaybeBatchedResponse<'a> {
-    Single(Response<'a>),
-    Batch(Vec<Response<'a>>),
+pub enum MaybeBatchedResponse<T> {
+    Single(Response<T>),
+    Batch(Vec<Response<T>>),
 }
 
 /// > To send several Request objects at the same time, the Client MAY send an Array filled with Request objects.
 #[derive(Serialize, Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(
-    bound(deserialize = "'de: 'a"),
     untagged,
     expecting = "a single request object, or an Array of batched request objects"
 )]
-pub enum MaybeBatchedRequest<'a> {
-    Single(Request<'a>),
-    Batch(Vec<Request<'a>>),
+pub enum MaybeBatchedRequest<T> {
+    Single(Request<T>),
+    Batch(Vec<Request<T>>),
 }
 
 #[cfg(test)]
