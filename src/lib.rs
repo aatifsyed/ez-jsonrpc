@@ -182,7 +182,10 @@ impl<'de> Deserialize<'de> for V2 {
     where
         D: serde::Deserializer<'de>,
     {
-        match &*Cow::<str>::deserialize(deserializer)? {
+        #[derive(Deserialize)]
+        struct SerdeCow<'a>(#[serde(borrow)] Cow<'a, str>);
+        let SerdeCow(cow) = SerdeCow::deserialize(deserializer)?;
+        match &*cow {
             "2.0" => Ok(Self),
             other => Err(D::Error::invalid_value(Unexpected::Str(other), &"2.0")),
         }
@@ -513,7 +516,10 @@ impl<T> fmt::Display for Error<T> {
         if let Some(e) = self.spec_message() {
             f.write_fmt(format_args!(" ({})", e))?
         };
-        f.write_fmt(format_args!(": {}", self.message))
+        if !self.message.is_empty() {
+            f.write_fmt(format_args!(": {}", self.message))?
+        }
+        Ok(())
     }
 }
 
