@@ -1,7 +1,12 @@
 [package]
-name = "jsonrpc-types"
+name = "ez-jsonrpc-types"
 version = "0.1.0"
 edition = "2021"
+description = "simple types conforming to the JSON-RPC 2.0 Spec"
+license = "MIT OR Apache-2.0"
+documentation = "https://docs.rs/ez-jsonrpc-types"
+repository = "https://github.com/aatifsyed/ez-jsonrpc-types"
+homepage = "https://crates.io/crates/ez-jsonrpc-types"
 
 [dependencies]
 serde_json = "1.0.119"
