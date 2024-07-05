@@ -3,40 +3,40 @@ use std::fmt;
 mod ser;
 
 use crate::{map, RequestParameters};
-use serde::{
-    de::value::{MapDeserializer, SeqDeserializer},
-    Deserializer,
+use serde::de::{
+    value::{MapDeserializer, SeqDeserializer},
+    IntoDeserializer,
 };
 
 #[doc(inline)]
 pub use ser::{Error, Serializer};
 
-impl<'de, T, E: serde::de::Error> serde::de::IntoDeserializer<'de, E> for RequestParameters<T>
+impl<'de, T, E: serde::de::Error> IntoDeserializer<'de, E> for RequestParameters<T>
 where
-    T: serde::de::IntoDeserializer<'de, E>,
+    T: IntoDeserializer<'de, E>,
 {
-    type Deserializer = IntoDeserializer<'de, T, E>;
+    type Deserializer = Deserializer<'de, T, E>;
 
     fn into_deserializer(self) -> Self::Deserializer {
-        IntoDeserializer {
+        Deserializer {
             inner: match self {
                 RequestParameters::ByPosition(it) => {
-                    _IntoDeserializer::Seq(SeqDeserializer::new(it.into_iter()))
+                    _Deserializer::Seq(SeqDeserializer::new(it.into_iter()))
                 }
                 RequestParameters::ByName(it) => {
-                    _IntoDeserializer::Map(MapDeserializer::new(it.into_iter()))
+                    _Deserializer::Map(MapDeserializer::new(it.into_iter()))
                 }
             },
         }
     }
 }
 
-/// [`IntoDeserializer`](serde::de::IntoDeserializer) implementation for [`RequestParameters`].
-pub struct IntoDeserializer<'de, T, E> {
-    inner: _IntoDeserializer<'de, T, E>,
+/// [`Deserializer`](serde::Deserializer) implementation for [`RequestParameters`].
+pub struct Deserializer<'de, T, E> {
+    inner: _Deserializer<'de, T, E>,
 }
 
-impl<'de, T, E> IntoDeserializer<'de, T, E> {
+impl<'de, T, E> Deserializer<'de, T, E> {
     /// Check for remaining elements.
     pub fn end(self) -> Result<(), E>
     where
@@ -44,28 +44,28 @@ impl<'de, T, E> IntoDeserializer<'de, T, E> {
     {
         let Self { inner } = self;
         match inner {
-            _IntoDeserializer::Seq(it) => it.end(),
-            _IntoDeserializer::Map(it) => it.end(),
+            _Deserializer::Seq(it) => it.end(),
+            _Deserializer::Map(it) => it.end(),
         }
     }
 }
 
-impl<'de, T, E> fmt::Debug for IntoDeserializer<'de, T, E> {
+impl<'de, T, E> fmt::Debug for Deserializer<'de, T, E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RequestParametersIntoDeserializer")
             .finish_non_exhaustive()
     }
 }
 
-enum _IntoDeserializer<'de, T, E> {
+enum _Deserializer<'de, T, E> {
     Seq(SeqDeserializer<std::vec::IntoIter<T>, E>),
     Map(MapDeserializer<'de, map::IntoIter<T>, E>),
 }
 
-impl<'de, T, E> Deserializer<'de> for IntoDeserializer<'de, T, E>
+impl<'de, T, E> serde::Deserializer<'de> for Deserializer<'de, T, E>
 where
     E: serde::de::Error,
-    T: serde::de::IntoDeserializer<'de, E>,
+    T: IntoDeserializer<'de, E>,
 {
     type Error = E;
 
@@ -75,8 +75,8 @@ where
     {
         let Self { inner } = self;
         match inner {
-            _IntoDeserializer::Seq(it) => it.deserialize_any(visitor),
-            _IntoDeserializer::Map(it) => it.deserialize_any(visitor),
+            _Deserializer::Seq(it) => it.deserialize_any(visitor),
+            _Deserializer::Map(it) => it.deserialize_any(visitor),
         }
     }
 
@@ -92,10 +92,7 @@ mod tests {
     use super::*;
 
     use fmt::Debug;
-    use serde::{
-        de::{DeserializeOwned, IntoDeserializer as _},
-        Deserialize, Serialize,
-    };
+    use serde::{de::DeserializeOwned, Deserialize, Serialize};
     use serde_json::json;
 
     #[derive(Deserialize, Serialize, PartialEq, Debug)]

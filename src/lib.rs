@@ -25,6 +25,7 @@ use serde::{
 };
 use serde_json::{Number, Value};
 
+#[doc(inline)]
 pub use map::Map;
 
 /// A `JSON-RPC 2.0` request object.
