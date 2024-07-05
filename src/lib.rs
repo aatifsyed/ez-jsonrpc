@@ -8,10 +8,12 @@
 //! - Appearances of dynamic JSON [`Value`]s are parameterised out, to allow
 //!   deferred serialization using, i.e [RawValue](https://docs.rs/serde_json/latest/serde_json/value/struct.RawValue.html).
 
+pub mod map;
+
 use std::{
     borrow::Cow,
     fmt::{self, Display},
-    hash::{Hash, RandomState},
+    hash::Hash,
     ops::RangeInclusive,
     str::FromStr,
 };
@@ -21,6 +23,8 @@ use serde::{
     Deserialize, Serialize,
 };
 use serde_json::{Number, Value};
+
+pub use map::Map;
 
 /// A `JSON-RPC 2.0` request object.
 ///
@@ -207,10 +211,8 @@ pub enum RequestParameters<T = Value> {
     /// > expected parameter names.
     /// > The absence of expected names MAY result in an error being generated.
     /// > The names MUST match exactly, including case, to the method's expected parameters.
-    ByName(Map<String, T>),
+    ByName(Map<T>),
 }
-
-pub type Map<K, V, S = RandomState> = indexmap::IndexMap<K, V, S>;
 
 impl<T> RequestParameters<T> {
     pub fn len(&self) -> usize {
