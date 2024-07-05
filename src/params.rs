@@ -1,11 +1,15 @@
 //! Extra support for parameter (de)serialization
 use std::fmt;
+mod ser;
 
 use crate::{map, RequestParameters};
 use serde::{
     de::value::{MapDeserializer, SeqDeserializer},
     Deserializer,
 };
+
+#[doc(inline)]
+pub use ser::{Error, Serializer};
 
 impl<'de, T, E: serde::de::Error> serde::de::IntoDeserializer<'de, E> for RequestParameters<T>
 where
@@ -83,38 +87,55 @@ where
     }
 }
 
-#[test]
-fn into_deserializer() {
-    assert_eq!(
-        <(String, u32)>::deserialize(
-            RequestParameters::ByPosition(vec![json!("string"), json!(1)]).into_deserializer(),
-        )
-        .unwrap(),
-        (String::from("string"), 1)
-    );
-    #[derive(serde::Deserialize, PartialEq, Debug)]
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use fmt::Debug;
+    use serde::{
+        de::{DeserializeOwned, IntoDeserializer as _},
+        Deserialize, Serialize,
+    };
+    use serde_json::json;
+
+    #[derive(Deserialize, Serialize, PartialEq, Debug)]
     struct Foo {
         name: String,
         count: u32,
     }
-    assert_eq!(
-        <Foo>::deserialize(
+
+    #[track_caller]
+    fn do_test<T: DeserializeOwned + Serialize + PartialEq + Debug>(
+        item: T,
+        expected: RequestParameters,
+    ) {
+        assert_eq!(
+            &T::deserialize(expected.clone().into_deserializer()).expect("couldn't deserialize"),
+            &item,
+            "deserialized mismatch"
+        );
+        assert_eq!(
+            item.serialize(Serializer).expect("couldn't serialize"),
+            expected,
+            "serialized mismatch"
+        )
+    }
+
+    #[test]
+    fn test() {
+        do_test(
+            (String::from("hello"), 1),
+            RequestParameters::ByPosition(vec![json!("hello"), json!(1)]),
+        );
+        do_test(
+            Foo {
+                name: "string".into(),
+                count: 1,
+            },
             RequestParameters::ByName(crate::Map::from_iter([
                 (String::from("name"), json!("string")),
-                (String::from("count"), json!(1))
-            ]))
-            .into_deserializer(),
-        )
-        .unwrap(),
-        Foo {
-            name: "string".into(),
-            count: 1
-        }
-    );
+                (String::from("count"), json!(1)),
+            ])),
+        );
+    }
 }
-
-#[cfg(test)]
-use {
-    serde::{de::IntoDeserializer as _, Deserialize as _},
-    serde_json::json,
-};
