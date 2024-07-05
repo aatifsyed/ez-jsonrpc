@@ -9,6 +9,7 @@
 //!   deferred serialization using, i.e [RawValue](https://docs.rs/serde_json/latest/serde_json/value/struct.RawValue.html).
 
 pub mod map;
+pub mod params;
 
 use std::{
     borrow::Cow,
