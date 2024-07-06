@@ -1,15 +1,32 @@
 //! Extra support for parameter (de)serialization
-use std::fmt;
+mod from_positional_impl;
 mod ser;
+mod to_positional_impl;
 
 use crate::{map, RequestParameters};
 use serde::de::{
     value::{MapDeserializer, SeqDeserializer},
     IntoDeserializer,
 };
+use std::fmt;
 
 #[doc(inline)]
 pub use ser::{Error, Serializer};
+
+pub trait ToPositional {
+    fn to_positional<S: serde::ser::SerializeSeq>(&self, serializer: S) -> Result<S::Ok, S::Error>;
+}
+
+pub trait FromPositional<'de> {
+    fn from_positional<I, T, E>(
+        deserializer: serde::de::value::SeqDeserializer<I, E>,
+    ) -> Result<Self, E>
+    where
+        Self: Sized,
+        I: Iterator<Item = T>,
+        T: IntoDeserializer<'de, E>,
+        E: serde::de::Error;
+}
 
 impl<'de, T, E: serde::de::Error> IntoDeserializer<'de, E> for RequestParameters<T>
 where
@@ -52,8 +69,7 @@ impl<'de, T, E> Deserializer<'de, T, E> {
 
 impl<'de, T, E> fmt::Debug for Deserializer<'de, T, E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RequestParametersIntoDeserializer")
-            .finish_non_exhaustive()
+        f.debug_struct("Deserializer").finish_non_exhaustive()
     }
 }
 
@@ -86,6 +102,29 @@ where
         tuple_struct map struct enum identifier ignored_any bool
     }
 }
+
+macro_rules! for_tuples {
+    ($callback:ident) => {
+        $callback!();
+        $callback!(T0);
+        $callback!(T0, T1);
+        $callback!(T0, T1, T2);
+        $callback!(T0, T1, T2, T3);
+        $callback!(T0, T1, T2, T3, T4);
+        $callback!(T0, T1, T2, T3, T4, T5);
+        $callback!(T0, T1, T2, T3, T4, T5, T6);
+        $callback!(T0, T1, T2, T3, T4, T5, T6, T7);
+        $callback!(T0, T1, T2, T3, T4, T5, T6, T7, T8);
+        $callback!(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9);
+        $callback!(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10);
+        $callback!(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11);
+        $callback!(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12);
+        $callback!(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T14);
+        $callback!(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T14, T15);
+        $callback!(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T14, T15, T16);
+    };
+}
+pub(crate) use for_tuples;
 
 #[cfg(test)]
 mod tests {
