@@ -1,6 +1,9 @@
 //! Extra support for parameter (de)serialization
+mod assert_named;
+mod from_named_impl;
 mod from_positional_impl;
 mod ser;
+mod to_named_impl;
 mod to_positional_impl;
 
 use crate::{map, RequestParameters};
@@ -11,7 +14,10 @@ use serde::de::{
 use std::fmt;
 
 #[doc(inline)]
-pub use ser::{Error, Serializer};
+pub use {
+    assert_named::AssertNamed,
+    ser::{Error, Serializer},
+};
 
 pub trait ToPositional {
     fn to_positional<S: serde::ser::SerializeSeq>(&self, serializer: S) -> Result<S::Ok, S::Error>;
@@ -25,6 +31,21 @@ pub trait FromPositional<'de> {
         Self: Sized,
         I: Iterator<Item = T>,
         T: IntoDeserializer<'de, E>,
+        E: serde::de::Error;
+}
+
+pub trait ToNamed {
+    fn to_named<S: serde::ser::SerializeMap>(&self, serializer: S) -> Result<S::Ok, S::Error>;
+}
+
+pub trait FromNamed<'de> {
+    fn from_named<K, V, I: Iterator<Item = (K, V)>, E>(
+        deserializer: serde::de::value::MapDeserializer<'de, I, E>,
+    ) -> Result<Self, E>
+    where
+        Self: Sized,
+        K: IntoDeserializer<'de, E>,
+        V: IntoDeserializer<'de, E>,
         E: serde::de::Error;
 }
 

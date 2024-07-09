@@ -7,6 +7,7 @@
 //!   to facilitate ergonomics.
 //! - Appearances of dynamic JSON [`Value`]s are parameterised out, to allow
 //!   deferred serialization using, i.e [RawValue](https://docs.rs/serde_json/latest/serde_json/value/struct.RawValue.html).
+//! - Serialization behaviour is identical to [`serde_json`].
 
 pub mod map;
 pub mod params;
