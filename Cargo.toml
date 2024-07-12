@@ -20,4 +20,4 @@ repository = "https://github.com/aatifsyed/ez-jsonrpc"
 homepage = "https://crates.io/crates/ez-jsonrpc"
 
 [workspace]
-members = ["types"]
+members = [ "macros","types"]
