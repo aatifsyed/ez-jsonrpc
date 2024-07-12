@@ -24,20 +24,16 @@ pub trait SerializePositional {
         -> Result<S::Ok, S::Error>;
 }
 
-pub trait DeserializePositional<'de> {
-    fn de_positional<D: serde::de::SeqAccess<'de>>(deserializer: D) -> Result<Self, D::Error>
-    where
-        Self: Sized;
+pub trait DeserializePositional<'de>: Sized {
+    fn de_positional<D: serde::de::SeqAccess<'de>>(deserializer: D) -> Result<Self, D::Error>;
 }
 
 pub trait SerializeNamed {
     fn ser_named<S: serde::ser::SerializeMap>(&self, serializer: S) -> Result<S::Ok, S::Error>;
 }
 
-pub trait DeserializeNamed<'de> {
-    fn de_named<D: serde::de::MapAccess<'de>>(deserializer: D) -> Result<Self, D::Error>
-    where
-        Self: Sized;
+pub trait DeserializeNamed<'de>: Sized {
+    fn de_named<D: serde::de::MapAccess<'de>>(deserializer: D) -> Result<Self, D::Error>;
 }
 
 impl<'de, T, E: serde::de::Error> IntoDeserializer<'de, E> for RequestParameters<T>

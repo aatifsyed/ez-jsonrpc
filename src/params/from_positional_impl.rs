@@ -9,8 +9,6 @@ macro_rules! ptr {
                 fn de_positional<D: serde::de::SeqAccess<'de>>(
                     deserializer: D,
                 ) -> Result<Self, D::Error>
-                where
-                    Self: Sized,
                 {
                     T::de_positional(deserializer).map(Into::into)
                 }
@@ -31,8 +29,6 @@ macro_rules! iter {
                 fn de_positional<D: serde::de::SeqAccess<'de>>(
                     deserializer: D,
                 ) -> Result<Self, D::Error>
-                where
-                    Self: Sized,
                 {
                     Self::deserialize(serde::de::value::SeqAccessDeserializer::new(deserializer))
                 }
@@ -60,8 +56,6 @@ macro_rules! tuple {
             fn de_positional<D: serde::de::SeqAccess<'de>>(
                 mut deserializer: D,
             ) -> Result<Self, D::Error>
-            where
-                Self: Sized,
             {
                 struct Expected;
                 impl serde::de::Expected for Expected {

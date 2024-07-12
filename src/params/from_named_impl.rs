@@ -12,10 +12,7 @@ where
     T: Deserialize<'de>,
     E: Deserialize<'de>,
 {
-    fn de_named<D: serde::de::MapAccess<'de>>(deserializer: D) -> Result<Self, D::Error>
-    where
-        Self: Sized,
-    {
+    fn de_named<D: serde::de::MapAccess<'de>>(deserializer: D) -> Result<Self, D::Error> {
         Deserialize::deserialize(MapAccessDeserializer::new(deserializer))
     }
 }
@@ -26,10 +23,7 @@ where
     V: Deserialize<'de>,
     S: BuildHasher + Default,
 {
-    fn de_named<D: serde::de::MapAccess<'de>>(deserializer: D) -> Result<Self, D::Error>
-    where
-        Self: Sized,
-    {
+    fn de_named<D: serde::de::MapAccess<'de>>(deserializer: D) -> Result<Self, D::Error> {
         Deserialize::deserialize(MapAccessDeserializer::new(deserializer))
     }
 }
@@ -38,10 +32,7 @@ where
     K: Deserialize<'de> + Ord,
     V: Deserialize<'de>,
 {
-    fn de_named<D: serde::de::MapAccess<'de>>(deserializer: D) -> Result<Self, D::Error>
-    where
-        Self: Sized,
-    {
+    fn de_named<D: serde::de::MapAccess<'de>>(deserializer: D) -> Result<Self, D::Error> {
         Deserialize::deserialize(MapAccessDeserializer::new(deserializer))
     }
 }
