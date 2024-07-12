@@ -1,12 +1,12 @@
-use super::ToPositional;
+use super::SerializePositional;
 use serde::{ser::SerializeSeq, Serialize};
 
 macro_rules! ptr {
     ($($ty:ty),* $(,)?) => {
         $(
-            impl<T: ?Sized> ToPositional for $ty where T: ToPositional {
-                fn to_positional<S: SerializeSeq>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-                    T::to_positional(self, serializer)
+            impl<T: ?Sized> SerializePositional for $ty where T: SerializePositional {
+                fn ser_positional<S: SerializeSeq>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                    T::ser_positional(self, serializer)
                 }
             }
         )*
@@ -18,8 +18,8 @@ ptr!(&T, &mut T, Box<T>, std::sync::Arc<T>, std::rc::Rc<T>);
 macro_rules! iter {
     ($($ty:ty),* $(,)?) => {
         $(
-            impl<T> ToPositional for $ty where T: Serialize {
-                fn to_positional<S: SerializeSeq>(&self, mut serializer: S) -> Result<S::Ok, S::Error> {
+            impl<T> SerializePositional for $ty where T: Serialize {
+                fn ser_positional<S: SerializeSeq>(&self, mut serializer: S) -> Result<S::Ok, S::Error> {
                     for it in self {
                         serializer.serialize_element(it)?
                     }
@@ -40,22 +40,22 @@ iter!(
     std::collections::HashSet<T>,
 );
 
-impl<const N: usize, T> ToPositional for [T; N]
+impl<const N: usize, T> SerializePositional for [T; N]
 where
     T: Serialize,
 {
-    fn to_positional<S: SerializeSeq>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.as_slice().to_positional(serializer)
+    fn ser_positional<S: SerializeSeq>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.as_slice().ser_positional(serializer)
     }
 }
 
 macro_rules! tuple {
     ($($ty:ident),* $(,)?) => {
-        impl<$($ty),*> ToPositional for ($($ty,)*)
+        impl<$($ty),*> SerializePositional for ($($ty,)*)
         where
         $($ty: Serialize),*
         {
-            fn to_positional<S: SerializeSeq>(&self,
+            fn ser_positional<S: SerializeSeq>(&self,
                 #[allow(unused_mut)]
                 mut serializer: S
             ) -> Result<S::Ok, S::Error> {

@@ -1,18 +1,18 @@
-use super::FromPositional;
+use super::DeserializePositional;
 use serde::{de::Error as _, Deserialize};
 use std::fmt;
 
 macro_rules! ptr {
     ($($ty:ty),* $(,)?) => {
         $(
-            impl<'de, T> FromPositional<'de> for $ty where T: FromPositional<'de> {
-                fn from_positional<D: serde::de::SeqAccess<'de>>(
+            impl<'de, T> DeserializePositional<'de> for $ty where T: DeserializePositional<'de> {
+                fn de_positional<D: serde::de::SeqAccess<'de>>(
                     deserializer: D,
                 ) -> Result<Self, D::Error>
                 where
                     Self: Sized,
                 {
-                    T::from_positional(deserializer).map(Into::into)
+                    T::de_positional(deserializer).map(Into::into)
                 }
             }
         )*
@@ -24,11 +24,11 @@ ptr!(Box<T>, std::sync::Arc<T>, std::rc::Rc<T>);
 macro_rules! iter {
     ($($ty:ty $(: $($bound:path)+)?),* $(,)?) => {
         $(
-            impl<'de, T> FromPositional<'de> for $ty
+            impl<'de, T> DeserializePositional<'de> for $ty
             where
                 T: Deserialize<'de> $($(+ $bound)*)?,
             {
-                fn from_positional<D: serde::de::SeqAccess<'de>>(
+                fn de_positional<D: serde::de::SeqAccess<'de>>(
                     deserializer: D,
                 ) -> Result<Self, D::Error>
                 where
@@ -53,11 +53,11 @@ iter!(
 
 macro_rules! tuple {
     ($($ty:ident),* $(,)?) => {
-        impl<'de, $($ty),*> FromPositional<'de> for ($($ty,)*)
+        impl<'de, $($ty),*> DeserializePositional<'de> for ($($ty,)*)
         where
         $($ty: Deserialize<'de>),*
         {
-            fn from_positional<D: serde::de::SeqAccess<'de>>(
+            fn de_positional<D: serde::de::SeqAccess<'de>>(
                 mut deserializer: D,
             ) -> Result<Self, D::Error>
             where

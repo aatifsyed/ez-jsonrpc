@@ -19,22 +19,23 @@ pub use {
     ser::{Error, Serializer},
 };
 
-pub trait ToPositional {
-    fn to_positional<S: serde::ser::SerializeSeq>(&self, serializer: S) -> Result<S::Ok, S::Error>;
+pub trait SerializePositional {
+    fn ser_positional<S: serde::ser::SerializeSeq>(&self, serializer: S)
+        -> Result<S::Ok, S::Error>;
 }
 
-pub trait FromPositional<'de> {
-    fn from_positional<D: serde::de::SeqAccess<'de>>(deserializer: D) -> Result<Self, D::Error>
+pub trait DeserializePositional<'de> {
+    fn de_positional<D: serde::de::SeqAccess<'de>>(deserializer: D) -> Result<Self, D::Error>
     where
         Self: Sized;
 }
 
-pub trait ToNamed {
-    fn to_named<S: serde::ser::SerializeMap>(&self, serializer: S) -> Result<S::Ok, S::Error>;
+pub trait SerializeNamed {
+    fn ser_named<S: serde::ser::SerializeMap>(&self, serializer: S) -> Result<S::Ok, S::Error>;
 }
 
-pub trait FromNamed<'de> {
-    fn from_named<D: serde::de::MapAccess<'de>>(deserializer: D) -> Result<Self, D::Error>
+pub trait DeserializeNamed<'de> {
+    fn de_named<D: serde::de::MapAccess<'de>>(deserializer: D) -> Result<Self, D::Error>
     where
         Self: Sized;
 }

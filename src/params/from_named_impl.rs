@@ -5,14 +5,14 @@ use std::{
 
 use serde::{de::value::MapAccessDeserializer, Deserialize};
 
-use super::FromNamed;
+use super::DeserializeNamed;
 
-impl<'de, T, E> FromNamed<'de> for Result<T, E>
+impl<'de, T, E> DeserializeNamed<'de> for Result<T, E>
 where
     T: Deserialize<'de>,
     E: Deserialize<'de>,
 {
-    fn from_named<D: serde::de::MapAccess<'de>>(deserializer: D) -> Result<Self, D::Error>
+    fn de_named<D: serde::de::MapAccess<'de>>(deserializer: D) -> Result<Self, D::Error>
     where
         Self: Sized,
     {
@@ -20,25 +20,25 @@ where
     }
 }
 
-impl<'de, K, V, S> FromNamed<'de> for HashMap<K, V, S>
+impl<'de, K, V, S> DeserializeNamed<'de> for HashMap<K, V, S>
 where
     K: Deserialize<'de> + Hash + Eq,
     V: Deserialize<'de>,
     S: BuildHasher + Default,
 {
-    fn from_named<D: serde::de::MapAccess<'de>>(deserializer: D) -> Result<Self, D::Error>
+    fn de_named<D: serde::de::MapAccess<'de>>(deserializer: D) -> Result<Self, D::Error>
     where
         Self: Sized,
     {
         Deserialize::deserialize(MapAccessDeserializer::new(deserializer))
     }
 }
-impl<'de, K, V> FromNamed<'de> for BTreeMap<K, V>
+impl<'de, K, V> DeserializeNamed<'de> for BTreeMap<K, V>
 where
     K: Deserialize<'de> + Ord,
     V: Deserialize<'de>,
 {
-    fn from_named<D: serde::de::MapAccess<'de>>(deserializer: D) -> Result<Self, D::Error>
+    fn de_named<D: serde::de::MapAccess<'de>>(deserializer: D) -> Result<Self, D::Error>
     where
         Self: Sized,
     {
