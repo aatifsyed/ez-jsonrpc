@@ -11,7 +11,7 @@ use serde::de::{
     value::{MapDeserializer, SeqDeserializer},
     IntoDeserializer,
 };
-use std::fmt;
+use std::{fmt, marker::PhantomData};
 
 #[doc(inline)]
 pub use {
@@ -28,12 +28,55 @@ pub trait DeserializePositional<'de>: Sized {
     fn de_positional<D: serde::de::SeqAccess<'de>>(deserializer: D) -> Result<Self, D::Error>;
 }
 
+pub trait DeserializePositionalSeed<'de>: Sized {
+    type Value;
+    fn de_positional_seed<D: serde::de::SeqAccess<'de>>(
+        self,
+        deserializer: D,
+    ) -> Result<Self::Value, D::Error>;
+}
+
+impl<'de, T> DeserializePositionalSeed<'de> for PhantomData<T>
+where
+    T: DeserializePositional<'de>,
+{
+    type Value = T;
+
+    fn de_positional_seed<D: serde::de::SeqAccess<'de>>(
+        self,
+        deserializer: D,
+    ) -> Result<Self::Value, D::Error> {
+        T::de_positional(deserializer)
+    }
+}
+
 pub trait SerializeNamed {
     fn ser_named<S: serde::ser::SerializeMap>(&self, serializer: S) -> Result<S::Ok, S::Error>;
 }
 
 pub trait DeserializeNamed<'de>: Sized {
     fn de_named<D: serde::de::MapAccess<'de>>(deserializer: D) -> Result<Self, D::Error>;
+}
+
+pub trait DeserializeNamedSeed<'de>: Sized {
+    type Value;
+    fn de_named_seed<D: serde::de::MapAccess<'de>>(
+        self,
+        deserializer: D,
+    ) -> Result<Self::Value, D::Error>;
+}
+
+impl<'de, T> DeserializeNamedSeed<'de> for PhantomData<T>
+where
+    T: DeserializeNamed<'de>,
+{
+    type Value = T;
+    fn de_named_seed<D: serde::de::MapAccess<'de>>(
+        self,
+        deserializer: D,
+    ) -> Result<Self::Value, D::Error> {
+        T::de_named(deserializer)
+    }
 }
 
 impl<'de, T, E: serde::de::Error> IntoDeserializer<'de, E> for RequestParameters<T>
