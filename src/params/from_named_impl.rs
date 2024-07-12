@@ -3,7 +3,7 @@ use std::{
     hash::{BuildHasher, Hash},
 };
 
-use serde::{de::IntoDeserializer, Deserialize};
+use serde::{de::value::MapAccessDeserializer, Deserialize};
 
 use super::FromNamed;
 
@@ -12,16 +12,11 @@ where
     T: Deserialize<'de>,
     E: Deserialize<'de>,
 {
-    fn from_named<K, V, I: Iterator<Item = (K, V)>, ME>(
-        deserializer: serde::de::value::MapDeserializer<'de, I, ME>,
-    ) -> Result<Self, ME>
+    fn from_named<D: serde::de::MapAccess<'de>>(deserializer: D) -> Result<Self, D::Error>
     where
         Self: Sized,
-        K: IntoDeserializer<'de, ME>,
-        V: IntoDeserializer<'de, ME>,
-        ME: serde::de::Error,
     {
-        Deserialize::deserialize(deserializer)
+        Deserialize::deserialize(MapAccessDeserializer::new(deserializer))
     }
 }
 
@@ -31,16 +26,11 @@ where
     V: Deserialize<'de>,
     S: BuildHasher + Default,
 {
-    fn from_named<IK, IV, I: Iterator<Item = (IK, IV)>, E>(
-        deserializer: serde::de::value::MapDeserializer<'de, I, E>,
-    ) -> Result<Self, E>
+    fn from_named<D: serde::de::MapAccess<'de>>(deserializer: D) -> Result<Self, D::Error>
     where
         Self: Sized,
-        IK: IntoDeserializer<'de, E>,
-        IV: IntoDeserializer<'de, E>,
-        E: serde::de::Error,
     {
-        Deserialize::deserialize(deserializer)
+        Deserialize::deserialize(MapAccessDeserializer::new(deserializer))
     }
 }
 impl<'de, K, V> FromNamed<'de> for BTreeMap<K, V>
@@ -48,15 +38,10 @@ where
     K: Deserialize<'de> + Ord,
     V: Deserialize<'de>,
 {
-    fn from_named<IK, IV, I: Iterator<Item = (IK, IV)>, E>(
-        deserializer: serde::de::value::MapDeserializer<'de, I, E>,
-    ) -> Result<Self, E>
+    fn from_named<D: serde::de::MapAccess<'de>>(deserializer: D) -> Result<Self, D::Error>
     where
         Self: Sized,
-        IK: IntoDeserializer<'de, E>,
-        IV: IntoDeserializer<'de, E>,
-        E: serde::de::Error,
     {
-        Deserialize::deserialize(deserializer)
+        Deserialize::deserialize(MapAccessDeserializer::new(deserializer))
     }
 }

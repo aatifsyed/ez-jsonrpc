@@ -34,14 +34,9 @@ pub trait ToNamed {
 }
 
 pub trait FromNamed<'de> {
-    fn from_named<K, V, I: Iterator<Item = (K, V)>, E>(
-        deserializer: serde::de::value::MapDeserializer<'de, I, E>,
-    ) -> Result<Self, E>
+    fn from_named<D: serde::de::MapAccess<'de>>(deserializer: D) -> Result<Self, D::Error>
     where
-        Self: Sized,
-        K: IntoDeserializer<'de, E>,
-        V: IntoDeserializer<'de, E>,
-        E: serde::de::Error;
+        Self: Sized;
 }
 
 impl<'de, T, E: serde::de::Error> IntoDeserializer<'de, E> for RequestParameters<T>
