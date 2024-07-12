@@ -1,21 +1,16 @@
 use super::FromPositional;
-use serde::{
-    de::{value::SeqDeserializer, IntoDeserializer},
-    Deserialize,
-};
+use serde::{de::Error as _, Deserialize};
+use std::fmt;
 
 macro_rules! ptr {
     ($($ty:ty),* $(,)?) => {
         $(
             impl<'de, T> FromPositional<'de> for $ty where T: FromPositional<'de> {
-                fn from_positional<II, I, E>(
-                    deserializer: SeqDeserializer<II, E>,
-                ) -> Result<Self, E>
+                fn from_positional<D: serde::de::SeqAccess<'de>>(
+                    deserializer: D,
+                ) -> Result<Self, D::Error>
                 where
                     Self: Sized,
-                    II: Iterator<Item = I>,
-                    I: IntoDeserializer<'de, E>,
-                    E: serde::de::Error
                 {
                     T::from_positional(deserializer).map(Into::into)
                 }
@@ -33,16 +28,13 @@ macro_rules! iter {
             where
                 T: Deserialize<'de> $($(+ $bound)*)?,
             {
-                fn from_positional<II, I, E>(
-                    deserializer: SeqDeserializer<II, E>,
-                ) -> Result<Self, E>
+                fn from_positional<D: serde::de::SeqAccess<'de>>(
+                    deserializer: D,
+                ) -> Result<Self, D::Error>
                 where
                     Self: Sized,
-                    II: Iterator<Item = I>,
-                    I: IntoDeserializer<'de, E>,
-                    E: serde::de::Error,
                 {
-                    Deserialize::deserialize(deserializer)
+                    Self::deserialize(serde::de::value::SeqAccessDeserializer::new(deserializer))
                 }
             }
         )*
@@ -65,14 +57,31 @@ macro_rules! tuple {
         where
         $($ty: Deserialize<'de>),*
         {
-            fn from_positional<I, T, E>(deserializer: SeqDeserializer<I, E>) -> Result<Self, E>
+            fn from_positional<D: serde::de::SeqAccess<'de>>(
+                mut deserializer: D,
+            ) -> Result<Self, D::Error>
             where
                 Self: Sized,
-                I: Iterator<Item = T>,
-                T: IntoDeserializer<'de, E>,
-                E: serde::de::Error,
             {
-                Deserialize::deserialize(deserializer)
+                struct Expected;
+                impl serde::de::Expected for Expected {
+                    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                        const ARITY: usize = <[()]>::len(&[$({stringify!($ty);},)*]);
+                        f.write_fmt(format_args!("a sequence of length {}", ARITY))
+                    }
+                }
+                #[allow(unused_mut)]
+                let mut ct = 0;
+                let ret = ($({
+                    match deserializer.next_element::<$ty>()? {
+                        Some(it) => { ct +=1; it },
+                        None => return Err(D::Error::invalid_length(ct, &Expected)),
+                    }
+                },)*);
+                let Ok(None) = deserializer.next_element::<serde::de::IgnoredAny>() else {
+                    return Err(D::Error::invalid_length(ct + 1, &Expected))
+                };
+                Ok(ret)
             }
         }
     };

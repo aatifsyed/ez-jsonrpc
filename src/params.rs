@@ -24,14 +24,9 @@ pub trait ToPositional {
 }
 
 pub trait FromPositional<'de> {
-    fn from_positional<I, T, E>(
-        deserializer: serde::de::value::SeqDeserializer<I, E>,
-    ) -> Result<Self, E>
+    fn from_positional<D: serde::de::SeqAccess<'de>>(deserializer: D) -> Result<Self, D::Error>
     where
-        Self: Sized,
-        I: Iterator<Item = T>,
-        T: IntoDeserializer<'de, E>,
-        E: serde::de::Error;
+        Self: Sized;
 }
 
 pub trait ToNamed {
