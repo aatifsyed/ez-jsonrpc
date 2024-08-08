@@ -1,5 +1,4 @@
-use crate::map::Map;
-use crate::RequestParameters;
+use crate::types::{map::Map, RequestParameters};
 use core::fmt::{self, Display};
 use serde::ser::{Error as _, Impossible, Serialize};
 use serde_json::{to_value, Value};

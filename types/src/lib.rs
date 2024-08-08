@@ -7,10 +7,8 @@
 //!   to facilitate ergonomics.
 //! - Appearances of dynamic JSON [`Value`]s are parameterised out, to allow
 //!   deferred serialization using, i.e [RawValue](https://docs.rs/serde_json/latest/serde_json/value/struct.RawValue.html).
-//! - Serialization behaviour is identical to [`serde_json`].
 
 pub mod map;
-pub mod params;
 
 use std::{
     borrow::Cow,
@@ -28,6 +26,8 @@ use serde_json::{Number, Value};
 
 #[doc(inline)]
 pub use map::Map;
+#[doc(inline)]
+pub use params::Deserializer;
 
 impl From<serde_json::Map<String, Value>> for Map {
     fn from(value: serde_json::Map<String, Value>) -> Self {
@@ -580,4 +580,100 @@ where
         json,
         "serialization mismatch"
     );
+}
+
+mod params {
+    use crate::{map, RequestParameters};
+    use serde::de::{
+        value::{MapDeserializer, SeqDeserializer},
+        IntoDeserializer,
+    };
+    use std::fmt;
+
+    /// [`Deserializer`](serde::Deserializer) implementation for [`RequestParameters`].
+    ///
+    /// i.e given a [`RequestParameters`], you may deserialize an
+    /// `impl` [`Deserialize`](serde::Deserialize) from it.
+    ///
+    /// ```
+    /// # use ez_jsonrpc_types::RequestParameters;
+    /// # use serde_json::json;
+    /// # use serde::{de::IntoDeserializer as _, Deserialize as _};
+    /// let params = RequestParameters::ByPosition(vec![json!(1), json!("two")]);
+    /// let deserialized = <(i64, String)>::deserialize(params.into_deserializer()).unwrap();
+    /// assert_eq!(deserialized, (1, String::from("two")));
+    /// ```
+    pub struct Deserializer<'de, T, E> {
+        inner: _Deserializer<'de, T, E>,
+    }
+
+    impl<'de, T, E: serde::de::Error> IntoDeserializer<'de, E> for RequestParameters<T>
+    where
+        T: IntoDeserializer<'de, E>,
+    {
+        type Deserializer = Deserializer<'de, T, E>;
+
+        fn into_deserializer(self) -> Self::Deserializer {
+            Deserializer {
+                inner: match self {
+                    RequestParameters::ByPosition(it) => {
+                        _Deserializer::Seq(SeqDeserializer::new(it.into_iter()))
+                    }
+                    RequestParameters::ByName(it) => {
+                        _Deserializer::Map(MapDeserializer::new(it.into_iter()))
+                    }
+                },
+            }
+        }
+    }
+
+    impl<'de, T, E> Deserializer<'de, T, E> {
+        /// Check for remaining elements.
+        pub fn end(self) -> Result<(), E>
+        where
+            E: serde::de::Error,
+        {
+            let Self { inner } = self;
+            match inner {
+                _Deserializer::Seq(it) => it.end(),
+                _Deserializer::Map(it) => it.end(),
+            }
+        }
+    }
+
+    impl<'de, T, E> fmt::Debug for Deserializer<'de, T, E> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("Deserializer").finish_non_exhaustive()
+        }
+    }
+
+    enum _Deserializer<'de, T, E> {
+        Seq(SeqDeserializer<std::vec::IntoIter<T>, E>),
+        Map(MapDeserializer<'de, map::IntoIter<T>, E>),
+    }
+
+    impl<'de, T, E> serde::Deserializer<'de> for Deserializer<'de, T, E>
+    where
+        E: serde::de::Error,
+        T: IntoDeserializer<'de, E>,
+    {
+        type Error = E;
+
+        fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+        where
+            V: serde::de::Visitor<'de>,
+        {
+            let Self { inner } = self;
+            match inner {
+                _Deserializer::Seq(it) => it.deserialize_any(visitor),
+                _Deserializer::Map(it) => it.deserialize_any(visitor),
+            }
+        }
+
+        serde::forward_to_deserialize_any! {
+            i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
+            bytes byte_buf option unit unit_struct newtype_struct seq tuple
+            tuple_struct map struct enum identifier ignored_any bool
+        }
+    }
 }
