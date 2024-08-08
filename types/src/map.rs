@@ -1,4 +1,4 @@
-//! A map of [String]s to values (typically [Value]).
+//! A map of [`String`]s to values (typically [`Value`]).
 //!
 //! By default the map is backed by a [`BTreeMap`]. Enable the `preserve_order`
 //! feature to use [`IndexMap`] instead.

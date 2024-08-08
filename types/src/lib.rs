@@ -6,7 +6,7 @@
 //! - All structs are owned (i.e, there is no borrowing of data from the [`Deserializer`](serde::Deserializer)),
 //!   to facilitate ergonomics.
 //! - Appearances of dynamic JSON [`Value`]s are parameterised out, to allow
-//!   deferred serialization using, i.e [RawValue](https://docs.rs/serde_json/latest/serde_json/value/struct.RawValue.html).
+//!   deferred serialization using, i.e [`RawValue`](https://docs.rs/serde_json/latest/serde_json/value/struct.RawValue.html).
 
 pub mod map;
 
@@ -26,7 +26,6 @@ use serde_json::{Number, Value};
 
 #[doc(inline)]
 pub use map::Map;
-#[doc(inline)]
 pub use params::Deserializer;
 
 impl From<serde_json::Map<String, Value>> for Map {
@@ -475,19 +474,19 @@ macro_rules! error_code_and_ctor {
                         Error::$const_name => {
                             const LIMBS: &[&'static str] = &[
                                 $($doc),*
-                                ];
-                                const LIMB: &str = LIMBS[0];
-                                const MESSAGE: &str = {
-                                    let (_quot, rest) = LIMB.as_bytes().split_at(2);
-                                    match std::str::from_utf8(rest) {
-                                        Ok(it) => it,
-                                        Err(_) => panic!()
-                                    }
-                                };
-                                Some(MESSAGE)
-                            },
-                        )*
-                        _ => None
+                            ];
+                            const LIMB: &str = LIMBS[0];
+                            const MESSAGE: &str = {
+                                let (_quot, rest) = LIMB.as_bytes().split_at(2);
+                                match std::str::from_utf8(rest) {
+                                    Ok(it) => it,
+                                    Err(_) => panic!()
+                                }
+                            };
+                            Some(MESSAGE)
+                        },
+                    )*
+                    _ => None
                     }
                 }
             }
