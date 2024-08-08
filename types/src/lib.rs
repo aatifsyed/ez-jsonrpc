@@ -29,6 +29,18 @@ use serde_json::{Number, Value};
 #[doc(inline)]
 pub use map::Map;
 
+impl From<serde_json::Map<String, Value>> for Map {
+    fn from(value: serde_json::Map<String, Value>) -> Self {
+        value.into_iter().collect()
+    }
+}
+
+impl From<Map> for serde_json::Map<String, Value> {
+    fn from(value: Map) -> Self {
+        value.into_iter().collect()
+    }
+}
+
 /// A `JSON-RPC 2.0` request object.
 ///
 /// Note that the `"jsonrpc": "2.0"` member is transparently checked during
