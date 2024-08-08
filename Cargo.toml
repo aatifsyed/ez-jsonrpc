@@ -1,13 +1,13 @@
 [package]
 name = "ez-jsonrpc"
 version = "0.1.0"
-description = "JSON-RPC 2.0 made easy!"
 
-edition.workspace = true
-license.workspace = true
+description.workspace = true
 documentation.workspace = true
-repository.workspace = true
+edition.workspace = true
 homepage.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 ez-jsonrpc-types = { path = "types", version = "0.2.0" }
