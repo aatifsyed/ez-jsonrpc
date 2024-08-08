@@ -12,6 +12,10 @@ homepage.workspace = true
 [dependencies]
 ez-jsonrpc-types = { path = "types" }
 
+[dev-dependencies]
+serde = "1.0.204"
+serde_json = "1.0.120"
+
 [workspace.package]
 edition = "2021"
 license = "MIT OR Apache-2.0"
@@ -20,4 +24,4 @@ repository = "https://github.com/aatifsyed/ez-jsonrpc"
 homepage = "https://crates.io/crates/ez-jsonrpc"
 
 [workspace]
-members = [ "macros","types"]
+members = ["macros", "types"]

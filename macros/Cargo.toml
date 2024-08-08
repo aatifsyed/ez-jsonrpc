@@ -7,4 +7,12 @@ documentation.workspace = true
 repository.workspace = true
 homepage.workspace = true
 
+[lib]
+proc-macro = true
+
 [dependencies]
+darling = "0.20.10"
+ident_case = "1.0.1"
+proc-macro2 = "1.0.86"
+quote = { version = "1.0.36", default-features = false }
+syn = { version = "2.0.70", features = ["derive", "proc-macro"], default-features = false }
