@@ -23,7 +23,7 @@ impl Error {
             inner: ErrorInner::UnsupportedType(t),
         }
     }
-    fn json(e: serde_json::Error) -> Self {
+    pub(crate) fn json(e: serde_json::Error) -> Self {
         Self {
             inner: ErrorInner::Json(e),
         }
@@ -74,7 +74,10 @@ impl std::error::Error for Error {}
 
 /// Serializer whose output is a [`RequestParameters`].
 ///
-/// Forbids items which are not serializable as an `Array` or `Object`.
+/// You may also be interested in [`ser::ByPosition`](crate::params::ser::ByPosition)
+/// or [`ser::ByName`](crate::params::ser::ByName).
+///
+/// Errors on items which are not serializable as an `Array` or `Object`.
 pub struct Serializer;
 
 impl serde::Serializer for Serializer {
@@ -358,7 +361,7 @@ impl serde::ser::SerializeMap for SerializeMap {
     }
 }
 
-struct MapKeySerializer;
+pub(crate) struct MapKeySerializer;
 
 fn key_must_be_a_string() -> Error {
     Error::custom("key must be a string")

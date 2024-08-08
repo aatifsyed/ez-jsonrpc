@@ -1,8 +1,8 @@
 //! Extra support for parameter (de)serialization
+mod _ser;
 mod assert_named;
 mod from_named_impl;
 mod from_positional_impl;
-mod ser;
 mod to_named_impl;
 mod to_positional_impl;
 
@@ -10,9 +10,102 @@ use std::marker::PhantomData;
 
 #[doc(inline)]
 pub use {
+    _ser::{Error, Serializer},
     assert_named::AssertNamed,
-    ser::{Error, Serializer},
 };
+
+pub mod ser {
+    use super::Error;
+    use ez_jsonrpc_types::Map;
+    use serde::ser::{SerializeMap, SerializeSeq};
+    use serde_json::Value;
+
+    /// A [`SerializeSeq`] implementor suitable for constructing a
+    /// [`RequestParameters::ByPosition`](crate::types::RequestParameters::ByPosition).
+    #[derive(Debug, Default, Clone)]
+    pub struct ByPosition {
+        inner: Vec<Value>,
+    }
+
+    impl ByPosition {
+        pub fn new() -> Self {
+            Self::default()
+        }
+        pub fn with_capacity(capacity: usize) -> Self {
+            Self {
+                inner: Vec::with_capacity(capacity),
+            }
+        }
+    }
+
+    impl SerializeSeq for ByPosition {
+        type Ok = Vec<Value>;
+        type Error = Error;
+
+        fn serialize_element<T>(&mut self, value: &T) -> Result<(), Self::Error>
+        where
+            T: ?Sized + serde::Serialize,
+        {
+            self.inner
+                .push(serde_json::to_value(value).map_err(Error::json)?);
+            Ok(())
+        }
+
+        fn end(self) -> Result<Self::Ok, Self::Error> {
+            Ok(self.inner)
+        }
+    }
+
+    /// A [`SerializeMap`] implementor suitable for constructing a
+    /// [`RequestParameters::ByName`](crate::types::RequestParameters::ByName).
+    #[derive(Debug, Default, Clone)]
+    pub struct ByName {
+        map: Map,
+        next_key: Option<String>,
+    }
+
+    impl ByName {
+        pub fn new() -> Self {
+            Self::default()
+        }
+        pub fn with_capacity(capacity: usize) -> Self {
+            Self {
+                map: Map::with_capacity(capacity),
+                next_key: None,
+            }
+        }
+    }
+
+    impl SerializeMap for ByName {
+        type Ok = Map;
+        type Error = Error;
+
+        fn serialize_key<T>(&mut self, key: &T) -> Result<(), Self::Error>
+        where
+            T: ?Sized + serde::Serialize,
+        {
+            self.next_key = Some(key.serialize(super::_ser::MapKeySerializer)?);
+            Ok(())
+        }
+
+        fn serialize_value<T>(&mut self, value: &T) -> Result<(), Self::Error>
+        where
+            T: ?Sized + serde::Serialize,
+        {
+            let key = self
+                .next_key
+                .take()
+                .expect("serialize_value called before serialize_key");
+            self.map
+                .insert(key, serde_json::to_value(value).map_err(Error::json)?);
+            Ok(())
+        }
+
+        fn end(self) -> Result<Self::Ok, Self::Error> {
+            Ok(self.map)
+        }
+    }
+}
 
 /// Support for serializing a type into a [`RequestParameters::ByPosition`](crate::types::RequestParameters::ByPosition).
 pub trait SerializePositional {
