@@ -544,9 +544,9 @@ impl<T> std::error::Error for Error<T> where T: fmt::Debug {}
     expecting = "a single response object, or an Array of batched response objects"
 )]
 /// A response to a [`MaybeBatchedRequest`].
-pub enum MaybeBatchedResponse<T> {
-    Single(Response<T>),
-    Batch(Vec<Response<T>>),
+pub enum MaybeBatchedResponse<T = Value, E = Value> {
+    Single(Response<T, E>),
+    Batch(Vec<Response<T, E>>),
 }
 
 /// > To send several Request objects at the same time, the Client MAY send an Array filled with Request objects.
@@ -555,7 +555,7 @@ pub enum MaybeBatchedResponse<T> {
     untagged,
     expecting = "a single request object, or an Array of batched request objects"
 )]
-pub enum MaybeBatchedRequest<T> {
+pub enum MaybeBatchedRequest<T = Value> {
     Single(Request<T>),
     Batch(Vec<Request<T>>),
 }
