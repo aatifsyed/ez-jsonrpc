@@ -123,8 +123,8 @@ impl<T> Request<T> {
 
 #[test]
 fn request() {
-    do_test::<Request>(
-        Request {
+    do_test(
+        Request::<Value> {
             method: "myMethod".into(),
             params: None,
             id: None,
@@ -134,8 +134,8 @@ fn request() {
             "method": "myMethod",
         }),
     );
-    do_test::<Request>(
-        Request {
+    do_test(
+        Request::<Value> {
             method: "myMethod".into(),
             params: None,
             id: Some(Id::Null),
@@ -146,8 +146,8 @@ fn request() {
             "id": null
         }),
     );
-    do_test::<Request>(
-        Request {
+    do_test(
+        Request::<Value> {
             method: "myMethod".into(),
             params: Some(RequestParameters::ByPosition(vec![
                 Value::Null,
@@ -161,8 +161,8 @@ fn request() {
             "params": [null, Value::from("hello")]
         }),
     );
-    do_test::<Request>(
-        Request {
+    do_test(
+        Request::<Value> {
             method: "myMethod".into(),
             params: Some(RequestParameters::ByName(
                 [
@@ -398,8 +398,8 @@ where
 
 #[test]
 fn response() {
-    do_test::<Response<(), ()>>(
-        Response {
+    do_test(
+        Response::<(), ()> {
             result: Ok(()),
             id: Id::Null,
         },
@@ -409,8 +409,8 @@ fn response() {
             "id": null
         }),
     );
-    do_test::<Response>(
-        Response {
+    do_test(
+        Response::<Value, Value> {
             result: Ok(Value::Null),
             id: Id::Null,
         },
