@@ -10,7 +10,9 @@ repository.workspace = true
 homepage.workspace = true
 
 [dependencies]
+ez-jsonrpc-macros = { path = "macros" }
 ez-jsonrpc-types = { path = "types" }
+serde = { version = "1.0.204" }
 
 [dev-dependencies]
 serde = "1.0.204"

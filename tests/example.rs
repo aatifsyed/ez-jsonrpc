@@ -1,4 +1,4 @@
-use ez_jsonrpc::types::params::{
+use ez_jsonrpc::params::{
     DeserializeNamed, DeserializePositional, SerializeNamed, SerializePositional,
 };
 use serde::{Deserialize, Serialize};
