@@ -24,13 +24,14 @@ pub mod __private {
         None as None_;
         Ok as Ok_;
         Result as Result;
+        serde as serde;
         serde::de::Error as de_Error;
         serde::de::IgnoredAny as IgnoredAny;
         serde::de::MapAccess as MapAccess;
         serde::de::SeqAccess as SeqAccess;
         serde::de::value::MapAccessDeserializer as MapAccessDeserializer;
+        serde::Deserialize as Deserialize;
         serde::ser::SerializeMap as SerializeMap;
         serde::ser::SerializeSeq as SerializeSeq;
-        serde::Deserialize as Deserialize;
     }
 }

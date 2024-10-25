@@ -85,6 +85,7 @@ fn expand_deserialize_named(item: DeriveInput) -> syn::Result<TokenStream> {
         Deserialize,
         MapAccessDeserializer,
         Result,
+        serde,
         ..
     } = Exports::new(krate);
     let shim = syn::Ident::new(&format!("_{}", ident.unraw()), ident.span());
@@ -106,12 +107,13 @@ fn expand_deserialize_named(item: DeriveInput) -> syn::Result<TokenStream> {
         },
     );
     let remote = ident.to_string();
+    let serde = serde.to_string();
     Ok(quote! {
         const _: () = {
             impl<'de> #DeserializeNamed<'de> for #ident {
                 fn de_named<D: #MapAccess<'de>>(deserializer: D) -> #Result<Self, D::Error> {
                     #[derive(#Deserialize)]
-                    #[serde(remote = #remote)]
+                    #[serde(remote = #remote, crate = #serde)]
                     #deny_unknown_fields
                     struct #shim {
                         #(#fields)*
@@ -258,14 +260,15 @@ exports! { // sync with the main crate
     None as None_;
     Ok as Ok_;
     Result as Result;
+    serde as serde;
     serde::de::Error as de_Error;
     serde::de::IgnoredAny as IgnoredAny;
     serde::de::MapAccess as MapAccess;
     serde::de::SeqAccess as SeqAccess;
     serde::de::value::MapAccessDeserializer as MapAccessDeserializer;
+    serde::Deserialize as Deserialize;
     serde::ser::SerializeMap as SerializeMap;
     serde::ser::SerializeSeq as SerializeSeq;
-    serde::Deserialize as Deserialize;
 }
 
 impl Strukt {
