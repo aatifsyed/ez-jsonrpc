@@ -8,6 +8,9 @@ mod to_positional_impl;
 
 use std::marker::PhantomData;
 
+#[doc(inline)] // TODO(aatifsyed): document these properly
+pub use ez_jsonrpc_macros::*;
+
 #[doc(inline)]
 pub use {
     _ser::{Error, Serializer},
