@@ -4,7 +4,11 @@ use darling::{ast, util, FromDeriveInput, FromField, FromMeta};
 use proc_macro2::TokenStream;
 use quote::{quote, ToTokens};
 use syn::{
-    parse::Parse, parse_macro_input, parse_quote, punctuated::Punctuated, DeriveInput, Ident, Token,
+    ext::IdentExt as _,
+    parse::{Parse, ParseStream},
+    parse_macro_input, parse_quote,
+    punctuated::Punctuated,
+    DeriveInput, Ident, Token,
 };
 
 #[proc_macro_derive(DeserializePositional, attributes(jsonrpc))]
@@ -23,13 +27,108 @@ pub fn serialize_positional(item: proc_macro::TokenStream) -> proc_macro::TokenS
         .into()
 }
 
+#[proc_macro_derive(DeserializeNamed, attributes(jsonrpc))]
+pub fn deserialize_named(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let item = parse_macro_input!(item as DeriveInput);
+    expand_deserialize_named(item)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+#[proc_macro_derive(SerializeNamed, attributes(jsonrpc))]
+pub fn serialize_named(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let item = parse_macro_input!(item as DeriveInput);
+    expand_serialize_named(item)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+fn expand_serialize_named(item: DeriveInput) -> syn::Result<TokenStream> {
+    let Strukt {
+        ident,
+        fields,
+        krate,
+        ..
+    } = Strukt::new(&item)?;
+    let Exports {
+        SerializeNamed,
+        SerializeMap,
+        Result,
+        ..
+    } = Exports::new(krate);
+    let ser_fields = fields.iter().map(|Field { ident, rename, .. }| {
+        let name = rename.clone().unwrap_or(ident.unraw().to_string());
+        quote! {serializer.serialize_entry(&#name, &self.#ident)?;}
+    });
+    Ok(quote! {
+        const _: () = {
+            impl #SerializeNamed for #ident {
+                fn ser_named<S: #SerializeMap>(&self, mut serializer: S) -> #Result<S::Ok, S::Error> {
+                    #(#ser_fields)*
+                    serializer.end()
+                }
+            }
+        };
+    })
+}
+
+fn expand_deserialize_named(item: DeriveInput) -> syn::Result<TokenStream> {
+    let Strukt {
+        ident,
+        fields,
+        deny_unknown_fields,
+        krate,
+    } = Strukt::new(&item)?;
+    let Exports {
+        DeserializeNamed,
+        MapAccess,
+        Deserialize,
+        MapAccessDeserializer,
+        Result,
+        ..
+    } = Exports::new(krate);
+    let shim = syn::Ident::new(&format!("_{}", ident.unraw()), ident.span());
+    let deny_unknown_fields = deny_unknown_fields.then_some(quote! {#[serde(deny_unknown_fields)]});
+    let fields = fields.iter().map(
+        |Field {
+             ident,
+             ty,
+             rename,
+             default,
+         }| {
+            let default = default.then_some(quote! {#[serde(default)]});
+            let rename = rename.as_ref().map(|it| quote! {#[serde(rename = #it)]});
+            quote! {
+                #default
+                #rename
+                #ident: #ty,
+            }
+        },
+    );
+    let remote = ident.to_string();
+    Ok(quote! {
+        const _: () = {
+            impl<'de> #DeserializeNamed<'de> for #ident {
+                fn de_named<D: #MapAccess<'de>>(deserializer: D) -> #Result<Self, D::Error> {
+                    #[derive(#Deserialize)]
+                    #[serde(remote = #remote)]
+                    #deny_unknown_fields
+                    struct #shim {
+                        #(#fields)*
+                    }
+                    #shim::deserialize(#MapAccessDeserializer::new(deserializer))
+                }
+            }
+        };
+    })
+}
+
 fn expand_deserialize_positional(item: DeriveInput) -> syn::Result<TokenStream> {
     let Strukt {
         ident,
         fields,
         deny_unknown_fields,
         krate,
-        ..
     } = Strukt::new(&item)?;
     for ((ix, l), r) in iter::zip(fields.iter().enumerate(), fields.iter().skip(1)) {
         if l.default && !r.default {
@@ -79,7 +178,7 @@ fn expand_deserialize_positional(item: DeriveInput) -> syn::Result<TokenStream> 
     Ok(quote! {
         const _: () = {
             impl<'de> #DeserializePositional<'de> for #ident {
-                fn de_positional<__D: #SeqAccess<'de>>(mut deserializer: __D) -> #Result<Self, __D::Error> {
+                fn de_positional<D: #SeqAccess<'de>>(mut deserializer: D) -> #Result<Self, D::Error> {
                     let this = Self {
                         #(#field_ctors)*
                     };
@@ -104,15 +203,14 @@ fn expand_serialize_positional(item: DeriveInput) -> syn::Result<TokenStream> {
         Result,
         ..
     } = Exports::new(krate);
-    let ser_fields = fields.iter().map(|it| {
-        let name = &it.ident;
-        quote! { serializer.serialize_element(&self.#name)?; }
-    });
+    let ser_fields = fields
+        .iter()
+        .map(|Field { ident, .. }| quote! { serializer.serialize_element(&self.#ident)?; });
 
     Ok(quote! {
         const _: () = {
             impl #SerializePositional for #ident {
-                fn ser_positional<__S: #SerializeSeq>(&self, mut serializer: __S) -> #Result<__S::Ok, __S::Error> {
+                fn ser_positional<S: #SerializeSeq>(&self, mut serializer: S) -> #Result<S::Ok, S::Error> {
                     #(#ser_fields)*
                     serializer.end()
                 }
@@ -152,16 +250,22 @@ macro_rules! exports {
 }
 
 exports! {
+    crate::params::DeserializeNamed as DeserializeNamed;
     crate::params::DeserializePositional as DeserializePositional;
+    crate::params::SerializeNamed as SerializeNamed;
     crate::params::SerializePositional as SerializePositional;
-    serde::de::Error as de_Error;
-    serde::de::IgnoredAny as IgnoredAny;
-    serde::de::SeqAccess as SeqAccess;
-    serde::ser::SerializeSeq as SerializeSeq;
     Err as Err_;
     None as None_;
     Ok as Ok_;
     Result as Result;
+    serde::de::Error as de_Error;
+    serde::de::IgnoredAny as IgnoredAny;
+    serde::de::MapAccess as MapAccess;
+    serde::de::SeqAccess as SeqAccess;
+    serde::de::value::MapAccessDeserializer as MapAccessDeserializer;
+    serde::ser::SerializeMap as SerializeMap;
+    serde::ser::SerializeSeq as SerializeSeq;
+    serde::Deserialize as Deserialize;
 }
 
 impl Strukt {
@@ -210,7 +314,7 @@ struct ModulePath {
 }
 
 impl Parse for ModulePath {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
         let syn::Path {
             leading_colon,
             segments,
@@ -243,7 +347,7 @@ impl FromMeta for ModulePath {
 struct Field {
     ident: Ident,
     ty: syn::Type,
-    rename: Option<Rename>,
+    rename: Option<String>,
     default: bool,
 }
 
@@ -254,7 +358,7 @@ impl FromField for Field {
         struct _Field {
             ident: Option<Ident>,
             ty: syn::Type,
-            rename: Option<Rename>,
+            rename: Option<String>,
             #[darling(default)]
             default: bool,
         }
@@ -276,87 +380,5 @@ impl FromField for Field {
             rename,
             default,
         })
-    }
-}
-
-#[derive(Debug)]
-struct Rename {
-    serialize: Option<String>,
-    deserialize: Option<String>,
-}
-
-impl FromMeta for Rename {
-    fn from_list(items: &[ast::NestedMeta]) -> darling::Result<Self> {
-        let mut errors = darling::Error::accumulator();
-        let mut this = Rename {
-            serialize: None,
-            deserialize: None,
-        };
-        for item in items {
-            match item {
-                ast::NestedMeta::Meta(it) => match it {
-                    syn::Meta::Path(it) => errors.push(darling::Error::unknown_field_path(it)),
-                    syn::Meta::List(it) => {
-                        errors.push(darling::Error::unknown_field_path(&it.path))
-                    }
-                    syn::Meta::NameValue(it) => {
-                        match [
-                            ("serialize", &mut this.serialize),
-                            ("deserialize", &mut this.deserialize),
-                        ]
-                        .into_iter()
-                        .find(|(ident, _)| it.path.is_ident(ident))
-                        {
-                            Some((_, dest)) => match dest {
-                                Some(_) => {
-                                    errors.push(darling::Error::duplicate_field_path(&it.path))
-                                }
-                                None => match &it.value {
-                                    syn::Expr::Lit(syn::ExprLit {
-                                        attrs: _,
-                                        lit: syn::Lit::Str(it),
-                                    }) => *dest = Some(it.value()),
-                                    other => {
-                                        errors.push(darling::Error::unexpected_expr_type(other))
-                                    }
-                                },
-                            },
-                            None => errors.push(darling::Error::unknown_field_path(&it.path)),
-                        };
-                    }
-                },
-                ast::NestedMeta::Lit(it) => errors.push(darling::Error::unexpected_lit_type(it)),
-            }
-        }
-        errors.finish_with(this)
-    }
-
-    fn from_char(value: char) -> darling::Result<Self> {
-        Self::from_string(&value.to_string())
-    }
-
-    fn from_string(value: &str) -> darling::Result<Self> {
-        Ok(Self {
-            serialize: Some(value.into()),
-            deserialize: Some(value.into()),
-        })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test() {
-        let it = syn::parse_quote! {
-            #[jsonrpc(crate = hello, deny_unknown_fields)]
-            struct Foo {
-                #[jsonrpc(rest, alias = "foo", alias = "bar")]
-                #[jsonrpc(rename(deserialize = "aa", serialize = "bb"))]
-                foo: String,
-            }
-        };
-        dbg!(Strukt::new(&it).unwrap());
     }
 }

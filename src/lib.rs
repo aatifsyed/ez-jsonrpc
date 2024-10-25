@@ -24,15 +24,21 @@ pub mod __private {
     }
 
     exports! {
+        crate::params::DeserializeNamed as DeserializeNamed;
         crate::params::DeserializePositional as DeserializePositional;
+        crate::params::SerializeNamed as SerializeNamed;
         crate::params::SerializePositional as SerializePositional;
-        serde::de::Error as de_Error;
-        serde::de::IgnoredAny as IgnoredAny;
-        serde::de::SeqAccess as SeqAccess;
-        serde::ser::SerializeSeq as SerializeSeq;
         Err as Err_;
         None as None_;
         Ok as Ok_;
         Result as Result;
+        serde::de::Error as de_Error;
+        serde::de::IgnoredAny as IgnoredAny;
+        serde::de::MapAccess as MapAccess;
+        serde::de::SeqAccess as SeqAccess;
+        serde::de::value::MapAccessDeserializer as MapAccessDeserializer;
+        serde::ser::SerializeMap as SerializeMap;
+        serde::ser::SerializeSeq as SerializeSeq;
+        serde::Deserialize as Deserialize;
     }
 }
