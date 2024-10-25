@@ -11,7 +11,7 @@ repository.workspace = true
 
 [dependencies]
 ez-jsonrpc-types = { path = "types", version = "0.4.0" }
-ez-jsonrpc-macros = { path = "macros", version = "0.1.0" }
+ez-jsonrpc-macros = { path = "macros", version = "0.1.1" }
 ryu = "1.0.18"
 serde = "1.0.205"
 serde_json = "1.0.122"
