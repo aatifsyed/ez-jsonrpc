@@ -18,7 +18,6 @@ pub use {
 };
 
 pub mod ser {
-    use super::Error;
     use ez_jsonrpc_types::Map;
     use serde::ser::{SerializeMap, SerializeSeq};
     use serde_json::Value;
@@ -43,14 +42,13 @@ pub mod ser {
 
     impl SerializeSeq for ByPosition {
         type Ok = Vec<Value>;
-        type Error = Error;
+        type Error = serde_json::Error;
 
         fn serialize_element<T>(&mut self, value: &T) -> Result<(), Self::Error>
         where
             T: ?Sized + serde::Serialize,
         {
-            self.inner
-                .push(serde_json::to_value(value).map_err(Error::json)?);
+            self.inner.push(serde_json::to_value(value)?);
             Ok(())
         }
 
@@ -81,14 +79,22 @@ pub mod ser {
 
     impl SerializeMap for ByName {
         type Ok = Map;
-        type Error = Error;
+        type Error = serde_json::Error;
 
         fn serialize_key<T>(&mut self, key: &T) -> Result<(), Self::Error>
         where
             T: ?Sized + serde::Serialize,
         {
-            self.next_key = Some(key.serialize(super::_ser::MapKeySerializer)?);
-            Ok(())
+            match key.serialize(super::_ser::MapKeySerializer) {
+                Ok(it) => {
+                    self.next_key = Some(it);
+                    Ok(())
+                }
+                Err(e) => match e.inner {
+                    super::_ser::ErrorInner::UnsupportedType(_) => unreachable!(),
+                    super::_ser::ErrorInner::Json(e) => Err(e),
+                },
+            }
         }
 
         fn serialize_value<T>(&mut self, value: &T) -> Result<(), Self::Error>
@@ -99,8 +105,7 @@ pub mod ser {
                 .next_key
                 .take()
                 .expect("serialize_value called before serialize_key");
-            self.map
-                .insert(key, serde_json::to_value(value).map_err(Error::json)?);
+            self.map.insert(key, serde_json::to_value(value)?);
             Ok(())
         }
 

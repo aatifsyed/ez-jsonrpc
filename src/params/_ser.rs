@@ -8,11 +8,11 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 /// Error when serializing to [`RequestParameters`] using a [`Serializer`].
 #[derive(Debug)]
 pub struct Error {
-    inner: ErrorInner,
+    pub(crate) inner: ErrorInner,
 }
 
 #[derive(Debug)]
-enum ErrorInner {
+pub(crate) enum ErrorInner {
     UnsupportedType(&'static str),
     Json(serde_json::Error),
 }
