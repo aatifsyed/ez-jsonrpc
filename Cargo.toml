@@ -10,7 +10,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-ez-jsonrpc-types = { path = "types", version = "0.5.0" }
+ez-jsonrpc-types = { path = "types", version = "0.5.1" }
 ez-jsonrpc-macros = { path = "macros", version = "0.1.1" }
 ryu = "1.0.18"
 serde = "1.0.205"
