@@ -15,6 +15,10 @@ ez-jsonrpc-macros = { path = "macros", version = "0.1.1" }
 ryu = "1.0.18"
 serde = "1.0.205"
 serde_json = "1.0.122"
+tower-layer = "0.3.3"
+tower-service = "0.3.3"
+futures-util = { version = "0.3.31", default-features = false }
+pin-project-lite = "0.2.15"
 
 [workspace.package]
 edition = "2021"

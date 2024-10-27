@@ -10,6 +10,8 @@ pub use types::{
     Response, Result,
 };
 
+pub mod protocol;
+
 #[doc(hidden)]
 pub mod __private {
     macro_rules! exports {
