@@ -1,0 +1,13 @@
+[package]
+name = "_doctest"
+version = "0.0.0"
+edition.workspace = true
+publish = false
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+serde = "1.0.213"
+serde_json = "1.0.132"
+pretty_assertions = "1.4.1"
