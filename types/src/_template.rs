@@ -1,17 +1,3 @@
-//! Generic structs where you can customize, e.g zerocopy deserialization.
-//!
-//! You SHOULD take care that your custom types also match the specification when (de)serialized
-//!
-//! ```
-//! let source = r#"
-//!     { "jsonrpc": "2.0", "method": "hello" }
-//! "#;
-//! let request = serde_json::from_str::<ez_jsonrpc_types::template::Request<&str>>(source).unwrap();
-//!                                       // `method` borrows from the input ^^^^
-//! let method: &str = request.method; // it works!
-//! assert_eq!(method, "hello");
-//! ```
-
 use crate::map::Map;
 use serde::{
     de::{self, Error as _, Unexpected},

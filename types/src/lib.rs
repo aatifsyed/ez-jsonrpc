@@ -12,7 +12,31 @@
 use serde_json::{Number, Value};
 
 pub mod map;
-pub mod template;
+
+/// Generic structs where you can customize, e.g zerocopy deserialization.
+///
+/// You SHOULD take care that your custom types also match the specification when (de)serialized
+///
+/// ```
+/// let source = r#"
+///     { "jsonrpc": "2.0", "method": "hello" }
+/// "#;
+/// let request = serde_json::from_str::<ez_jsonrpc_types::template::Request<&str>>(source).unwrap();
+///                                       // `method` borrows from the input ^^^^
+/// let method: &str = request.method; // it works!
+/// assert_eq!(method, "hello");
+/// ```
+pub mod template {
+    use serde_json::Value;
+
+    #[doc(inline)]
+    pub use crate::_template::*;
+
+    pub type Result<ValueT = Value, ValueE = Value, StringT = String> =
+        std::result::Result<ValueT, Error<ValueE, StringT>>;
+}
+
+mod _template;
 
 /// A JSON-RPC 2.0 request.
 ///
@@ -161,8 +185,8 @@ pub type Error = template::Error;
 pub type MaybeBatchedRequest = template::MaybeBatchedRequest;
 /// See [`template::MaybeBatchedResponse`] for specification wording.
 pub type MaybeBatchedResponse = template::MaybeBatchedResponse;
-
-pub type Result<T = Value> = std::result::Result<T, Error>;
+/// Result type where [`Err`] is a JSON-RPC 2.0 [`Error`].
+pub type Result<T = Value> = template::Result<T>;
 
 impl From<serde_json::Map<String, Value>> for Map {
     fn from(value: serde_json::Map<String, Value>) -> Self {
