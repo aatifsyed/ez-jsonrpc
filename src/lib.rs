@@ -10,7 +10,7 @@ pub use types::{
     Response, Result,
 };
 
-pub mod protocol;
+pub mod server;
 
 #[doc(hidden)]
 pub mod __private {
