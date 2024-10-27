@@ -5,6 +5,11 @@ pub mod types {
     pub use ez_jsonrpc_types::*;
 }
 
+pub use types::{
+    Error, Id, Map, MaybeBatchedRequest, MaybeBatchedResponse, Request, RequestParameters,
+    Response, Result,
+};
+
 #[doc(hidden)]
 pub mod __private {
     macro_rules! exports {
