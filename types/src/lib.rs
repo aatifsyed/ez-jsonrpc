@@ -32,8 +32,8 @@ pub mod template {
     #[doc(inline)]
     pub use crate::_template::*;
 
-    pub type Result<ValueT = Value, ValueE = Value, StringT = String> =
-        std::result::Result<ValueT, Error<ValueE, StringT>>;
+    pub type Result<ValueT = Value, ValueE = Value, StringE = String> =
+        std::result::Result<ValueT, Error<ValueE, StringE>>;
 }
 
 mod _template;

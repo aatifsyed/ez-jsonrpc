@@ -202,7 +202,7 @@ impl FromStr for Id {
 /// Note that the `"jsonrpc": "2.0"` member is transparently checked during
 /// deserialization, and added during serialization.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Response<ValueT = Value, ValueE = Value, StringT = String, IdT = Id> {
+pub struct Response<ValueT = Value, ValueE = Value, StringE = String, IdT = Id> {
     /// > "result":
     /// >
     /// > This member is REQUIRED on success.
@@ -213,7 +213,7 @@ pub struct Response<ValueT = Value, ValueE = Value, StringT = String, IdT = Id> 
     /// >
     /// > This member is REQUIRED on error.
     /// > This member MUST NOT exist if there was no error triggered during invocation.
-    pub result: Result<ValueT, Error<ValueE, StringT>>,
+    pub result: Result<ValueT, Error<ValueE, StringE>>,
     /// > This member is REQUIRED.
     /// > It MUST be the same as the value of the id member in the Request Object.
     /// > If there was an error in detecting the id in the Request object
@@ -221,11 +221,11 @@ pub struct Response<ValueT = Value, ValueE = Value, StringT = String, IdT = Id> 
     pub id: IdT,
 }
 
-impl<'de, ValueT, ValueE, StringT, IdT> Deserialize<'de> for Response<ValueT, ValueE, StringT, IdT>
+impl<'de, ValueT, ValueE, StringE, IdT> Deserialize<'de> for Response<ValueT, ValueE, StringE, IdT>
 where
     ValueT: Deserialize<'de>,
     ValueE: Deserialize<'de>,
-    StringT: Deserialize<'de>,
+    StringE: Deserialize<'de>,
     IdT: Deserialize<'de>,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -277,11 +277,11 @@ where
     }
 }
 
-impl<ValueT, ValueE, StringT, IdT> Serialize for Response<ValueT, ValueE, StringT, IdT>
+impl<ValueT, ValueE, StringE, IdT> Serialize for Response<ValueT, ValueE, StringE, IdT>
 where
     ValueT: Serialize,
     ValueE: Serialize,
-    StringT: Serialize,
+    StringE: Serialize,
     IdT: Serialize,
 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -289,12 +289,12 @@ where
         S: serde::Serializer,
     {
         #[derive(Serialize)]
-        struct _Response<ValueT, ValueE, StringT, IdT> {
+        struct _Response<ValueT, ValueE, StringE, IdT> {
             jsonrpc: V2,
             #[serde(skip_serializing_if = "Option::is_none")]
             result: Option<Option<ValueT>>,
             #[serde(skip_serializing_if = "Option::is_none")]
-            error: Option<Error<ValueE, StringT>>,
+            error: Option<Error<ValueE, StringE>>,
             id: IdT,
         }
         let Self { result, id } = self;
@@ -474,9 +474,9 @@ where
     expecting = "a single response object, or an Array of batched response objects"
 )]
 /// A response to a [`MaybeBatchedRequest`].
-pub enum MaybeBatchedResponse<ValueT = Value, ValueE = Value, StringT = String, IdT = Id> {
-    Single(Response<ValueT, ValueE, StringT, IdT>),
-    Batch(Vec<Response<ValueT, ValueE, StringT, IdT>>),
+pub enum MaybeBatchedResponse<ValueT = Value, ValueE = Value, StringE = String, IdT = Id> {
+    Single(Response<ValueT, ValueE, StringE, IdT>),
+    Batch(Vec<Response<ValueT, ValueE, StringE, IdT>>),
 }
 
 /// > To send several Request objects at the same time, the Client MAY send an Array filled with Request objects.
