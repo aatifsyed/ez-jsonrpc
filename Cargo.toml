@@ -17,8 +17,15 @@ serde = "1.0.205"
 serde_json = "1.0.122"
 tower-layer = "0.3.3"
 tower-service = "0.3.3"
-futures-util = { version = "0.3.31", default-features = false }
+futures-util = { version = "0.3.31", default-features = false, features = [
+    "async-await",
+    "async-await-macro",
+    "sink",
+    "std",
+] }
 pin-project-lite = "0.2.15"
+futures-channel = { version = "0.3.31", features = ["alloc"] }
+either = { version = "1.13.0", default-features = false }
 
 [workspace.package]
 edition = "2021"
@@ -29,4 +36,4 @@ homepage = "https://crates.io/crates/ez-jsonrpc"
 description = "JSON-RPC 2.0 made easy!"
 
 [workspace]
-members = [ "_doctest","macros", "types"]
+members = ["_doctest", "macros", "types"]

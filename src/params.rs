@@ -23,7 +23,7 @@ pub mod ser {
     use serde_json::Value;
 
     /// A [`SerializeSeq`] implementor suitable for constructing a
-    /// [`RequestParameters::ByPosition`](crate::types::RequestParameters::ByPosition).
+    /// [`RequestParameters::ByPosition`](crate::types::template::RequestParameters::ByPosition).
     #[derive(Debug, Default, Clone)]
     pub struct ByPosition {
         inner: Vec<Value>,
@@ -58,7 +58,7 @@ pub mod ser {
     }
 
     /// A [`SerializeMap`] implementor suitable for constructing a
-    /// [`RequestParameters::ByName`](crate::types::RequestParameters::ByName).
+    /// [`RequestParameters::ByName`](crate::types::template::RequestParameters::ByName).
     #[derive(Debug, Default, Clone)]
     pub struct ByName {
         map: Map,
@@ -115,18 +115,18 @@ pub mod ser {
     }
 }
 
-/// Support for serializing a type into a [`RequestParameters::ByPosition`](crate::types::RequestParameters::ByPosition).
+/// Support for serializing a type into a [`RequestParameters::ByPosition`](crate::types::template::RequestParameters::ByPosition).
 pub trait SerializePositional {
     fn ser_positional<S: serde::ser::SerializeSeq>(&self, serializer: S)
         -> Result<S::Ok, S::Error>;
 }
 
-/// Support for deserializing a type from a [`RequestParameters::ByPosition`](crate::types::RequestParameters::ByPosition).
+/// Support for deserializing a type from a [`RequestParameters::ByPosition`](crate::types::template::RequestParameters::ByPosition).
 pub trait DeserializePositional<'de>: Sized {
     fn de_positional<D: serde::de::SeqAccess<'de>>(deserializer: D) -> Result<Self, D::Error>;
 }
 
-/// Support for deserializing a type from a [`RequestParameters::ByPosition`](crate::types::RequestParameters::ByPosition).
+/// Support for deserializing a type from a [`RequestParameters::ByPosition`](crate::types::template::RequestParameters::ByPosition).
 pub trait DeserializePositionalSeed<'de>: Sized {
     type Value;
     fn de_positional_seed<D: serde::de::SeqAccess<'de>>(
@@ -149,17 +149,17 @@ where
     }
 }
 
-/// Support for serializing a type into a [`RequestParameters::ByName`](crate::types::RequestParameters::ByName).
+/// Support for serializing a type into a [`RequestParameters::ByName`](crate::types::template::RequestParameters::ByName).
 pub trait SerializeNamed {
     fn ser_named<S: serde::ser::SerializeMap>(&self, serializer: S) -> Result<S::Ok, S::Error>;
 }
 
-/// Support for serializing a type from a [`RequestParameters::ByName`](crate::types::RequestParameters::ByName).
+/// Support for serializing a type from a [`RequestParameters::ByName`](crate::types::template::RequestParameters::ByName).
 pub trait DeserializeNamed<'de>: Sized {
     fn de_named<D: serde::de::MapAccess<'de>>(deserializer: D) -> Result<Self, D::Error>;
 }
 
-/// Support for serializing a type from a [`RequestParameters::ByName`](crate::types::RequestParameters::ByName).
+/// Support for serializing a type from a [`RequestParameters::ByName`](crate::types::template::RequestParameters::ByName).
 pub trait DeserializeNamedSeed<'de>: Sized {
     type Value;
     fn de_named_seed<D: serde::de::MapAccess<'de>>(
