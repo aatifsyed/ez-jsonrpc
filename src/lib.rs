@@ -21,56 +21,210 @@ pub mod client {
         num::Wrapping,
         ops::Deref,
         pin::{self, pin, Pin},
-        sync::{Arc, Mutex},
+        sync::{
+            atomic::{AtomicU32, AtomicU64},
+            Arc, Mutex,
+        },
         task::{ready, Context, Poll},
     };
 
     use either::Either;
     use ez_jsonrpc_types::Id;
     use futures_channel::oneshot;
-    use futures_util::Stream;
-    use futures_util::{FutureExt, SinkExt as _, StreamExt, TryStreamExt};
+    use futures_util::{
+        lock::{Mutex as AsyncMutex, OwnedMutexLockFuture},
+        stream::Fuse,
+    };
+    use futures_util::{stream, FutureExt, SinkExt as _, StreamExt, TryStreamExt};
+    use futures_util::{Sink, Stream};
     use pin_project_lite::pin_project;
     use serde::{Deserialize, Serialize};
     use serde_json::Value;
 
     use crate::types::template;
 
+    pin_project! {
+    /// Stream adapter which sends each item, one at a time,
+    /// from the souce stream into the given sink.
+    ///
+    /// The source stream is a tuple of `(Item, Sender)`.
+    /// If the sink returns an error, the `Sender` for the relevant message is
+    /// notified (or if that fails, the error is yielded).
+    ///
+    /// If the item was successfully flushed into the sink, it is yielded,
+    /// along with some extracted metadata.
+    #[derive(Debug)]
+    pub struct SendEach<StreamT, SinkT, AnyOk, SinkE, ForwardT, ForwardF> {
+        // Always [`Some`] if [`SendEachState::FlushSink`].
+        outstanding: Option<(ForwardT, oneshot::Sender<Result<AnyOk, SinkE>>)>,
+        state: SendEachState,
+        forward: ForwardF,
+        #[pin] stream: Fuse<StreamT>,
+        #[pin] sink: SinkT,
+    }}
+
+    #[derive(Debug)]
+    enum SendEachState {
+        Alive,
+        FlushSink,
+        StreamDead,
+        SinkDead,
+        Dead,
+    }
+
+    impl<StreamT, SinkT, T, AnyOk, SinkE, ForwardT, ForwardF> Stream
+        for SendEach<StreamT, SinkT, AnyOk, SinkE, ForwardT, ForwardF>
+    where
+        StreamT: Stream<Item = (T, oneshot::Sender<Result<AnyOk, SinkT::Error>>)>,
+        SinkT: Sink<T, Error = SinkE>,
+        ForwardF: FnMut(&T) -> ForwardT,
+    {
+        type Item = Result<(ForwardT, oneshot::Sender<Result<AnyOk, SinkT::Error>>), SinkT::Error>;
+
+        fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            let mut this = self.project();
+            loop {
+                match this.state {
+                    // Note that even if the sink is dead,
+                    // we _still_ want to propogate its errors to the sender.
+                    SendEachState::Alive | SendEachState::SinkDead => {
+                        match (
+                            // the ordering is important here -
+                            // we only want to pull an item from the stream if
+                            // we _know_ the sink is ready.
+                            ready!(this.sink.as_mut().poll_ready(cx)),
+                            ready!(this.stream.as_mut().poll_next(cx)),
+                        ) {
+                            (Ok(()), None) => *this.state = SendEachState::StreamDead,
+                            (Ok(()), Some((sendme, pageme))) => {
+                                let forward = (this.forward)(&sendme);
+                                match this.sink.as_mut().start_send(sendme) {
+                                    Ok(()) => {
+                                        *this.state = SendEachState::FlushSink;
+                                        assert!(this.outstanding.is_none());
+                                        *this.outstanding = Some((forward, pageme));
+                                    }
+                                    Err(e) => {
+                                        *this.state = SendEachState::SinkDead;
+                                        match pageme.send(Err(e)) {
+                                            Ok(()) => {}
+                                            Err(Err(e)) => return Poll::Ready(Some(Err(e))),
+                                            Err(Ok(_)) => unreachable!(),
+                                        }
+                                    }
+                                };
+                            }
+                            (Err(e), None) => {
+                                *this.state = SendEachState::Dead;
+                                return Poll::Ready(Some(Err(e)));
+                            }
+                            (Err(e), Some((_sendme, pageme))) => {
+                                *this.state = SendEachState::SinkDead;
+                                match pageme.send(Err(e)) {
+                                    Ok(()) => {}
+                                    Err(Err(e)) => return Poll::Ready(Some(Err(e))),
+                                    Err(Ok(_)) => unreachable!(),
+                                }
+                            }
+                        }
+                    }
+                    // We're flushing a message and have the sender to notify
+                    // of errors.
+                    SendEachState::FlushSink => match ready!(this.sink.as_mut().poll_flush(cx)) {
+                        Ok(()) => {
+                            *this.state = SendEachState::Alive;
+                            return Poll::Ready(Some(Ok(this.outstanding.take().unwrap())));
+                        }
+                        Err(e) => {
+                            *this.state = SendEachState::SinkDead;
+                            let (_forward, pageme) = this.outstanding.take().unwrap();
+                            match pageme.send(Err(e)) {
+                                Ok(()) => {}
+                                Err(Err(e)) => return Poll::Ready(Some(Err(e))),
+                                Err(Ok(_)) => unreachable!(),
+                            }
+                        }
+                    },
+                    // We've handled all requests - close the sink.
+                    SendEachState::StreamDead => {
+                        let closed = ready!(this.sink.as_mut().poll_close(cx));
+                        // cannot call any sink methods from this point.
+                        *this.state = SendEachState::Dead;
+                        match closed {
+                            Ok(()) => {}
+                            Err(e) => return Poll::Ready(Some(Err(e))), // parting error
+                        }
+                    }
+                    SendEachState::Dead => return Poll::Ready(None),
+                }
+            }
+        }
+    }
+
+    pub struct Service<SinkT, StreamT> {
+        sink: Arc<AsyncMutex<SinkT>>,
+        stream: Arc<AsyncMutex<StreamT>>,
+        id: AtomicU32,
+    }
+
+    impl<MethodT, RequestParametersT, SinkT, StreamT, ValueT, ValueE, StringE, StreamE>
+        tower_service::Service<(MethodT, RequestParametersT)> for &Service<SinkT, StreamT>
+    where
+        SinkT: Sink<template::Request<MethodT, u32, RequestParametersT>>,
+        StreamT: Stream<Item = Result<template::Response<ValueT, ValueE, StringE, u32>, StreamE>>,
+    {
+        type Response = template::Result;
+        type Error = Either<SinkT::Error, StreamE>;
+        type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
+
+        fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, req: (MethodT, RequestParametersT)) -> Self::Future {
+            todo!()
+        }
+    }
+
+    pub enum TransportError {}
+
     pub struct Client {}
 
-    async fn executor<
-        ClientT,
-        SinkT,
-        StreamT,
-        MethodT,
-        RequestParametersT,
-        ValueT,
-        ValueE,
-        StringT,
-        StreamE,
-    >(
+    async fn executor<ClientT, SinkT, MethodT, RequestParametersT, IdI, IdT, ResponseT>(
         client: ClientT,
+        mut ids: IdI,
         sink: SinkT,
-        stream: StreamT,
     ) where
-        ClientT: futures_util::Stream<
+        ClientT: Stream<
             Item = (
-                Option<oneshot::Sender<template::Result<ValueT, ValueE, StringT>>>,
                 MethodT,
                 Option<RequestParametersT>,
+                Option<oneshot::Sender<Result<ResponseT, SinkT::Error>>>,
             ),
         >,
-        StreamT: futures_util::Stream<
-            Item = Result<template::Response<ValueT, ValueE, StringT, u64>, StreamE>,
-        >,
-        SinkT: futures_util::Sink<template::Request<MethodT, u64, RequestParametersT>>,
+        SinkT: Sink<template::Request<MethodT, IdT, RequestParametersT>>,
+        IdI: Iterator<Item = IdT>,
     {
-        let map = Mutex::new(HashMap::new());
-        let send_requests = AssignId::new(client, (0..=u64::MAX).cycle(), &map)
-            .map(Ok)
-            .forward(sink);
-
-        Reactor::new(stream, &map);
+        let mut client = pin!(client);
+        let mut sink = pin!(sink);
+        while let Some((method, params, sender)) = client.next().await {
+            match sender {
+                Some(sender) => match ids.next() {
+                    Some(id) => todo!(),
+                    None => continue, // we've run out of IDs! skip
+                },
+                None => {
+                    let _ = sink
+                        .feed(template::Request {
+                            method,
+                            params,
+                            id: None,
+                        })
+                        .await;
+                }
+            }
+        }
+        todo!()
     }
 
     pin_project! {
@@ -90,10 +244,9 @@ pub mod client {
         }
     }
 
-    impl<StreamT, P, ValueT, ValueE, StringE, IdT, TransportE> Stream for Reactor<StreamT, P>
+    impl<StreamT, P, ValueT, ValueE, StringE, IdT, StreamE> Stream for Reactor<StreamT, P>
     where
-        StreamT:
-            Stream<Item = Result<template::Response<ValueT, ValueE, StringE, IdT>, TransportE>>,
+        StreamT: Stream<Item = Result<template::Response<ValueT, ValueE, StringE, IdT>, StreamE>>,
         P: Deref<
             Target = Mutex<
                 HashMap<IdT, oneshot::Sender<template::Result<ValueT, ValueE, StringE>>>,
@@ -101,7 +254,7 @@ pub mod client {
         >,
         IdT: Hash + Eq,
     {
-        type Item = ReactorError<TransportE, ValueT, ValueE, StringE, IdT>;
+        type Item = ReactorError<StreamE, ValueT, ValueE, StringE, IdT>;
 
         fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
             let mut this = self.project();
