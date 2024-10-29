@@ -16,18 +16,20 @@ pub mod client {
         collections::HashMap,
         convert::Infallible,
         fmt,
-        hash::{BuildHasher, Hash},
+        future::Future,
+        hash::{BuildHasher, Hash, RandomState},
         pin::Pin,
         task::{ready, Context, Poll},
     };
 
     use futures_channel::oneshot;
     use futures_util::{
-        stream::FusedStream,
-        stream::{Map, Select},
+        future::Pending,
+        stream::{FusedStream, FuturesUnordered},
+        Sink, Stream,
     };
-    use futures_util::{Sink, Stream};
     use pin_project_lite::pin_project;
+    use serde_json::Value;
 
     use crate::types::template;
 
@@ -159,7 +161,7 @@ pub mod client {
         }
     }
 
-    pub struct ReactorRequest<
+    pub struct ReactorRegistration<
         IdT = template::Id,
         RespT = template::Result,
         SendE = Infallible,
@@ -179,7 +181,7 @@ pub mod client {
         IdI: Iterator<Item = IdT>,
         IdT: Clone,
     {
-        type Item = Result<ReactorRequest<IdT, RespT, SendE, RecvE, MetaT>, SendE>;
+        type Item = Result<ReactorRegistration<IdT, RespT, SendE, RecvE, MetaT>, SendE>;
 
         fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
             let mut this = self.project();
@@ -285,7 +287,7 @@ pub mod client {
                             match this.outstanding.take().unwrap() {
                                 Outstanding::Notification(sender) => drop(sender),
                                 Outstanding::Dialogue { id, sender, meta } => {
-                                    return Poll::Ready(Some(Ok(ReactorRequest {
+                                    return Poll::Ready(Some(Ok(ReactorRegistration {
                                         id,
                                         sender,
                                         meta,
@@ -353,71 +355,235 @@ pub mod client {
     }
 
     pin_project! {
-    pub struct Reactor<DispatchS, IncomingS, DItem, IItem, SendE, RecvE, IdT, RespT, BuildHasherT> {
-        #[pin] react: Select<
-            Map<DispatchS, fn(DItem) -> React<DItem, IItem>>,
-            Map<IncomingS, fn(IItem) -> React<DItem, IItem>>,
-        >,
-        map: HashMap<IdT, oneshot::Sender<Result<RespT, Direction<SendE, RecvE>>>, BuildHasherT>
+    pub struct Reactor<RegS, RespS, TimeoutFut = Pending<()>, IdT = template::Id, RespT = template::Result, SendE = Infallible, RecvE = SendE, BuildHasherT = RandomState> {
+        #[pin] registrations: RegS,
+        #[pin] responses: RespS,
+        #[pin] timeouts: FuturesUnordered<Timeout<TimeoutFut, IdT>>,
+        map: HashMap<IdT, oneshot::Sender<Result<RespT, Direction<SendE, RecvE>>>, BuildHasherT>,
     }}
 
-    impl<DispatchS, IncomingS, SendE, RecvE, IdT, ValueT, ValueE, StringE, BuildHasherT> Stream
-        for Reactor<
-            DispatchS,
-            IncomingS,
-            (
-                IdT,
-                oneshot::Sender<
-                    Result<template::Result<ValueT, ValueE, StringE>, Direction<SendE, RecvE>>,
-                >,
-            ),
-            template::Response<ValueT, ValueE, StringE, IdT>,
-            SendE,
-            RecvE,
-            IdT,
-            template::Result<ValueT, ValueE, StringE>,
-            BuildHasherT,
-        >
-    where
-        DispatchS: Stream<
-            Item = (
-                IdT,
-                oneshot::Sender<
-                    Result<template::Result<ValueT, ValueE, StringE>, Direction<SendE, RecvE>>,
-                >,
-            ),
-        >,
-        IncomingS: Stream<Item = template::Response<ValueT, ValueE, StringE, IdT>>,
-        BuildHasherT: BuildHasher,
-        IdT: Hash + Eq,
+    impl<RegS, RespS, TimeoutFut, IdT, RespT, SendE, RecvE, BuildHasherT>
+        Reactor<RegS, RespS, TimeoutFut, IdT, RespT, SendE, RecvE, BuildHasherT>
     {
-        type Item = ();
-
-        fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-            let mut this = self.project();
-            loop {
-                match ready!(this.react.as_mut().poll_next(cx)) {
-                    Some(React::Dispatched((id, sender))) => {
-                        this.map.insert(id, sender);
-                    }
-                    Some(React::Incoming(template::Response { result, id })) => {
-                        match this.map.remove(&id) {
-                            Some(sender) => match sender.send(Ok(result)) {
-                                Ok(()) => todo!(),
-                                Err(result) => todo!(),
-                            },
-                            None => todo!(),
-                        }
-                    }
-                    None => return Poll::Ready(None),
-                }
+        pub fn new(registrations: RegS, responses: RespS, build_hasher: BuildHasherT) -> Self {
+            Self {
+                registrations,
+                responses,
+                timeouts: FuturesUnordered::new(),
+                map: HashMap::with_hasher(build_hasher),
             }
         }
     }
 
-    enum React<D, I> {
-        Dispatched(D),
-        Incoming(I),
+    impl<RegS, RespS, TimeoutFut, IdT, ValueT, ValueE, StringE, SendE, RecvE, BuildHasherT> Stream
+        for Reactor<
+            RegS,
+            RespS,
+            TimeoutFut,
+            IdT,
+            template::Result<ValueT, ValueE, StringE>,
+            SendE,
+            RecvE,
+            BuildHasherT,
+        >
+    where
+        RegS: FusedStream<
+            Item = ReactorRegistration<
+                IdT,
+                template::Result<ValueT, ValueE, StringE>,
+                SendE,
+                RecvE,
+                TimeoutFut,
+            >,
+        >,
+        RespS: FusedStream<Item = template::Response<ValueT, ValueE, StringE, IdT>>,
+        TimeoutFut: Future<Output = ()>,
+        IdT: Hash + Eq + Clone,
+        BuildHasherT: BuildHasher,
+    {
+        type Item = ReactorError<ValueT, ValueE, StringE, IdT>;
+
+        fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            let mut this = self.project();
+
+            // handle registrations first, they're likely to be in-process,
+            // and we don't want to risk a response arriving before the registration.
+            while let Poll::Ready(Some(ReactorRegistration { id, sender, meta })) =
+                this.registrations.as_mut().poll_next(cx)
+            {
+                this.map.insert(id.clone(), sender);
+                this.timeouts.push(Timeout::new(meta, id));
+            }
+            while let Poll::Ready(Some(template::Response { result, id })) =
+                this.responses.as_mut().poll_next(cx)
+            {
+                match this.map.remove(&id) {
+                    Some(sender) => match sender.send(Ok(result)) {
+                        Ok(()) => {}
+                        Err(Ok(result)) => {
+                            return Poll::Ready(Some(ReactorError {
+                                kind: ReactorErrorKind::Hangup,
+                                response: template::Response { result, id },
+                            }))
+                        }
+                        Err(Err(_)) => unreachable!(),
+                    },
+                    None => {
+                        return Poll::Ready(Some(ReactorError {
+                            kind: ReactorErrorKind::NoSuchId,
+                            response: template::Response { result, id },
+                        }))
+                    }
+                }
+            }
+            // finally, handle timeouts
+            while let Poll::Ready(Some(id)) = this.timeouts.as_mut().poll_next(cx) {
+                this.map.remove(&id);
+            }
+            match this.registrations.is_terminated() && this.responses.is_terminated() {
+                true => Poll::Ready(None),
+                false => Poll::Pending,
+            }
+        }
+    }
+
+    impl<RegS, RespS, TimeoutFut, IdT, ValueT, ValueE, StringE, SendE, RecvE, BuildHasherT>
+        FusedStream
+        for Reactor<
+            RegS,
+            RespS,
+            TimeoutFut,
+            IdT,
+            template::Result<ValueT, ValueE, StringE>,
+            SendE,
+            RecvE,
+            BuildHasherT,
+        >
+    where
+        RegS: FusedStream<
+            Item = ReactorRegistration<
+                IdT,
+                template::Result<ValueT, ValueE, StringE>,
+                SendE,
+                RecvE,
+                TimeoutFut,
+            >,
+        >,
+        RespS: FusedStream<Item = template::Response<ValueT, ValueE, StringE, IdT>>,
+        TimeoutFut: Future<Output = ()>,
+        IdT: Hash + Eq + Clone,
+        BuildHasherT: BuildHasher,
+    {
+        fn is_terminated(&self) -> bool {
+            self.registrations.is_terminated() && self.responses.is_terminated()
+        }
+    }
+
+    impl<RegS, RespS, TimeoutFut, IdT, RespT, SendE, RecvE, BuildHasherT>
+        Reactor<RegS, RespS, TimeoutFut, IdT, RespT, SendE, RecvE, BuildHasherT>
+    {
+        pub fn error_with(
+            &mut self,
+            id: &IdT,
+            mut e: impl FnMut() -> RecvE,
+        ) -> Result<(), ReactorErrorKind>
+        where
+            IdT: Hash + Eq,
+            BuildHasherT: BuildHasher,
+        {
+            match self.map.remove(id) {
+                Some(sender) => match sender.send(Err(Direction::Receiving(e()))) {
+                    Ok(()) => Ok(()),
+                    Err(_) => Err(ReactorErrorKind::Hangup),
+                },
+                None => Err(ReactorErrorKind::NoSuchId),
+            }
+        }
+        pub fn error_pin_with(
+            self: Pin<&mut Self>,
+            id: &IdT,
+            mut e: impl FnMut() -> RecvE,
+        ) -> Result<(), ReactorErrorKind>
+        where
+            IdT: Hash + Eq,
+            BuildHasherT: BuildHasher,
+        {
+            match self.project().map.remove(id) {
+                Some(sender) => match sender.send(Err(Direction::Receiving(e()))) {
+                    Ok(()) => Ok(()),
+                    Err(_) => Err(ReactorErrorKind::Hangup),
+                },
+                None => Err(ReactorErrorKind::NoSuchId),
+            }
+        }
+        pub fn broadcast_with(&mut self, mut e: impl FnMut() -> RecvE) {
+            for (_, sender) in self.map.drain() {
+                let _ignore_hup = sender.send(Err(Direction::Receiving(e())));
+            }
+        }
+        pub fn broadcast_pin_with(self: Pin<&mut Self>, mut e: impl FnMut() -> RecvE) {
+            for (_, sender) in self.project().map.drain() {
+                let _ignore_hup = sender.send(Err(Direction::Receiving(e())));
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub enum ReactorErrorKind {
+        NoSuchId,
+        Hangup,
+    }
+    impl fmt::Display for ReactorErrorKind {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match self {
+                ReactorErrorKind::NoSuchId => f.write_str("no listener for the given ID"),
+                ReactorErrorKind::Hangup => f.write_str("listener for the given ID hung up"),
+            }
+        }
+    }
+
+    impl std::error::Error for ReactorErrorKind {}
+
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct ReactorError<ValueT = Value, ValueE = ValueT, StringE = String, IdT = template::Id> {
+        pub kind: ReactorErrorKind,
+        pub response: template::Response<ValueT, ValueE, StringE, IdT>,
+    }
+
+    impl<ValueT, ValueE, StringE, IdT> fmt::Display for ReactorError<ValueT, ValueE, StringE, IdT> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            self.kind.fmt(f)
+        }
+    }
+    impl<ValueT: fmt::Debug, ValueE: fmt::Debug, StringE: fmt::Debug, IdT: fmt::Debug>
+        std::error::Error for ReactorError<ValueT, ValueE, StringE, IdT>
+    {
+    }
+
+    pin_project! {
+    #[derive(Debug, Clone)]
+    struct Timeout<Fut, IdT = template::Id> {
+        #[pin] fut: Fut,
+        id: Option<IdT>,
+    }}
+
+    impl<Fut, IdT> Timeout<Fut, IdT> {
+        pub fn new(fut: Fut, id: IdT) -> Self {
+            Self { fut, id: Some(id) }
+        }
+    }
+
+    impl<Fut, IdT> Future for Timeout<Fut, IdT>
+    where
+        Fut: Future<Output = ()>,
+    {
+        type Output = IdT;
+
+        fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            let this = self.project();
+            ready!(this.fut.poll(cx));
+            Poll::Ready(this.id.take().expect("future polled after completion"))
+        }
     }
 }
 
