@@ -35,5 +35,9 @@ repository = "https://github.com/aatifsyed/ez-jsonrpc"
 homepage = "https://crates.io/crates/ez-jsonrpc"
 description = "JSON-RPC 2.0 made easy!"
 
+[dev-dependencies]
+futures = "0.3.31"
+tap = "1.0.1"
+
 [workspace]
 members = ["_doctest", "macros", "types"]

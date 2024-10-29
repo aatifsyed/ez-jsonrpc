@@ -15,33 +15,95 @@ pub mod client {
     use std::{
         collections::HashMap,
         convert::Infallible,
-        future::Future,
-        hash::{BuildHasher, Hash, RandomState},
-        marker::PhantomData,
-        num::Wrapping,
-        ops::Deref,
-        pin::{self, pin, Pin},
-        sync::{
-            atomic::{AtomicU32, AtomicU64},
-            Arc, Mutex,
-        },
+        fmt,
+        hash::{BuildHasher, Hash},
+        pin::Pin,
         task::{ready, Context, Poll},
     };
 
-    use either::Either;
-    use ez_jsonrpc_types::Id;
     use futures_channel::oneshot;
     use futures_util::{
-        lock::{Mutex as AsyncMutex, OwnedMutexLockFuture},
-        stream::{Fuse, Map, Select},
+        stream::FusedStream,
+        stream::{Map, Select},
     };
-    use futures_util::{stream, FutureExt, SinkExt as _, StreamExt, TryStreamExt};
     use futures_util::{Sink, Stream};
     use pin_project_lite::pin_project;
-    use serde::{Deserialize, Serialize};
-    use serde_json::Value;
 
     use crate::types::template;
+
+    #[derive(Clone, Default)]
+    pub struct Ids(u64);
+
+    impl Ids {
+        pub fn new() -> Self {
+            Self::default()
+        }
+    }
+    impl Iterator for Ids {
+        type Item = template::Id;
+        fn next(&mut self) -> Option<Self::Item> {
+            let id = template::Id::from(self.0);
+            self.0 = self.0.wrapping_add(1);
+            Some(id)
+        }
+    }
+
+    /// Item to be send to a [`Dispatcher`].
+    #[derive(Debug)]
+    pub struct DispatchRequest<
+        SendE = Infallible,
+        RecvE = SendE,
+        MethodT = String,
+        ParamsT = template::RequestParameters,
+        RespT = template::Result,
+        MetaT = (),
+    > {
+        pub method: MethodT,
+        pub params: Option<ParamsT>,
+        pub interest: Interest<RespT, SendE, RecvE, MetaT>,
+    }
+
+    /// How a [`Dispatcher`] should handle a message.
+    #[derive(Debug)]
+    pub enum Interest<RespT = template::Result, SendE = Infallible, RecvE = SendE, MetaT = ()> {
+        /// Flush it to the [`Sink`], notifying the sender on failure (dropping it on success)
+        Notification(oneshot::Sender<SendE>),
+        /// As above, but forward the [`id`](template::Request::id) to the [`Reactor`],
+        /// along with the given metadata.
+        Dialogue {
+            sender: oneshot::Sender<Result<RespT, Direction<SendE, RecvE>>>,
+            meta: MetaT,
+        },
+    }
+
+    /// Which half of message handling an error pertains to.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub enum Direction<SendE = Infallible, RecvE = SendE> {
+        Sending(SendE),
+        Receiving(RecvE),
+    }
+
+    impl<SendE, RecvE> fmt::Display for Direction<SendE, RecvE> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match self {
+                Direction::Sending(_) => f.write_str("error sending message"),
+                Direction::Receiving(_) => f.write_str("error receiving response"),
+            }
+        }
+    }
+
+    impl<SendE, RecvE> std::error::Error for Direction<SendE, RecvE>
+    where
+        SendE: std::error::Error + 'static,
+        RecvE: std::error::Error + 'static,
+    {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            Some(match self {
+                Direction::Sending(it) => it,
+                Direction::Receiving(it) => it,
+            })
+        }
+    }
 
     #[derive(Debug)]
     enum DispatchState {
@@ -52,34 +114,40 @@ pub mod client {
         Dead,
     }
 
-    pub enum Interest<RespT, SendE, RecvE> {
+    /// The request that the [`Dispatcher`] is currently flushing into its [`Sink`].
+    enum Outstanding<
+        RespT = template::Result,
+        SendE = Infallible,
+        RecvE = SendE,
+        IdT = template::Id,
+        MetaT = (),
+    > {
         Notification(oneshot::Sender<SendE>),
-        Dialogue(oneshot::Sender<Result<RespT, Direction<SendE, RecvE>>>),
-    }
-
-    enum Outstanding<RespT, SendE, RecvE, IdT> {
-        Notification(oneshot::Sender<SendE>),
-        Dialogue(IdT, oneshot::Sender<Result<RespT, Direction<SendE, RecvE>>>),
-    }
-
-    pub enum Direction<SendE, RecvE> {
-        Sending(SendE),
-        Receiving(RecvE),
+        Dialogue {
+            id: IdT,
+            sender: oneshot::Sender<Result<RespT, Direction<SendE, RecvE>>>,
+            meta: MetaT,
+        },
     }
 
     pin_project! {
-    pub struct Dispatcher<StreamT, SinkT, RespT, IdT, SendE, RecvE, IdI> {
+    /// Receives [`DispatchRequest`]s, and flush each into its sink, one at a time.
+    ///
+    /// [sender](oneshot::Sender)s are notified of sink failures,
+    /// and [`Interest::Dialogue`]s are yielded as [`ReactorRequest`]s.
+    pub struct Dispatcher<StreamT, SinkT, RespT = template::Result, IdT = template::Id, SendE = Infallible, RecvE = SendE, MetaT = (), IdI = Ids> {
         #[pin] stream: StreamT,
         #[pin] sink: SinkT,
         state: DispatchState,
         // Always [`Some`] if [`DispatchState::FlushSink`].
-        outstanding: Option<Outstanding<RespT, SendE, RecvE, IdT>>,
+        outstanding: Option<Outstanding<RespT, SendE, RecvE, IdT, MetaT>>,
         ids: IdI,
     }}
 
-    impl<StreamT, SinkT, RespT, IdT, SendE, RecvE, IdI>
-        Dispatcher<StreamT, SinkT, RespT, IdT, SendE, RecvE, IdI>
+    impl<StreamT, SinkT, RespT, IdT, SendE, RecvE, MetaT, IdI>
+        Dispatcher<StreamT, SinkT, RespT, IdT, SendE, RecvE, MetaT, IdI>
     {
+        /// `ids` MUST NOT be exhausted during the lifetime of the dispatcher.
         pub fn new(stream: StreamT, sink: SinkT, ids: IdI) -> Self {
             Self {
                 stream,
@@ -91,15 +159,27 @@ pub mod client {
         }
     }
 
-    impl<StreamT, SinkT, RespT, IdT, SendE, RecvE, IdI, MethodT, ParamsT> Stream
-        for Dispatcher<StreamT, SinkT, RespT, IdT, SendE, RecvE, IdI>
+    pub struct ReactorRequest<
+        IdT = template::Id,
+        RespT = template::Result,
+        SendE = Infallible,
+        RecvE = SendE,
+        MetaT = (),
+    > {
+        pub id: IdT,
+        pub sender: oneshot::Sender<Result<RespT, Direction<SendE, RecvE>>>,
+        pub meta: MetaT,
+    }
+
+    impl<StreamT, SinkT, RespT, IdT, SendE, RecvE, MetaT, IdI, MethodT, ParamsT> Stream
+        for Dispatcher<StreamT, SinkT, RespT, IdT, SendE, RecvE, MetaT, IdI>
     where
-        StreamT: Stream<Item = (MethodT, Option<ParamsT>, Interest<RespT, SendE, RecvE>)>,
+        StreamT: Stream<Item = DispatchRequest<SendE, RecvE, MethodT, ParamsT, RespT, MetaT>>,
         SinkT: Sink<template::Request<MethodT, IdT, ParamsT>, Error = SendE>,
         IdI: Iterator<Item = IdT>,
         IdT: Clone,
     {
-        type Item = Result<(IdT, oneshot::Sender<Result<RespT, Direction<SendE, RecvE>>>), SendE>;
+        type Item = Result<ReactorRequest<IdT, RespT, SendE, RecvE, MetaT>, SendE>;
 
         fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
             let mut this = self.project();
@@ -116,7 +196,14 @@ pub mod client {
                             ready!(this.stream.as_mut().poll_next(cx)),
                         ) {
                             (Ok(()), None) => *this.state = DispatchState::StreamDead,
-                            (Ok(()), Some((method, params, interest))) => match interest {
+                            (
+                                Ok(()),
+                                Some(DispatchRequest {
+                                    method,
+                                    params,
+                                    interest,
+                                }),
+                            ) => match interest {
                                 Interest::Notification(sender) => {
                                     let request = template::Request {
                                         method,
@@ -139,7 +226,7 @@ pub mod client {
                                         }
                                     }
                                 }
-                                Interest::Dialogue(sender) => {
+                                Interest::Dialogue { sender, meta } => {
                                     let id =
                                         this.ids.next().expect("ID iterator should be infinite");
                                     let request = template::Request {
@@ -152,7 +239,7 @@ pub mod client {
                                             *this.state = DispatchState::FlushSink;
                                             assert!(this.outstanding.is_none());
                                             *this.outstanding =
-                                                Some(Outstanding::Dialogue(id, sender));
+                                                Some(Outstanding::Dialogue { id, sender, meta });
                                         }
                                         Err(e) => {
                                             *this.state = DispatchState::SinkDead;
@@ -167,14 +254,21 @@ pub mod client {
                                 *this.state = DispatchState::Dead;
                                 return Poll::Ready(Some(Err(e)));
                             }
-                            (Err(e), Some((_, _, interest))) => {
+                            (
+                                Err(e),
+                                Some(DispatchRequest {
+                                    method: _,
+                                    params: _,
+                                    interest,
+                                }),
+                            ) => {
                                 *this.state = DispatchState::SinkDead;
                                 match interest {
                                     Interest::Notification(sender) => match sender.send(e) {
                                         Ok(()) => {}
                                         Err(e) => return Poll::Ready(Some(Err(e))),
                                     },
-                                    Interest::Dialogue(sender) => {
+                                    Interest::Dialogue { sender, meta: _ } => {
                                         if let Some(e) = send_error(sender, e) {
                                             return Poll::Ready(Some(Err(e)));
                                         }
@@ -190,8 +284,12 @@ pub mod client {
                             *this.state = DispatchState::Alive;
                             match this.outstanding.take().unwrap() {
                                 Outstanding::Notification(sender) => drop(sender),
-                                Outstanding::Dialogue(id, sender) => {
-                                    return Poll::Ready(Some(Ok((id, sender))))
+                                Outstanding::Dialogue { id, sender, meta } => {
+                                    return Poll::Ready(Some(Ok(ReactorRequest {
+                                        id,
+                                        sender,
+                                        meta,
+                                    })))
                                 }
                             }
                         }
@@ -202,7 +300,11 @@ pub mod client {
                                     Ok(()) => {}
                                     Err(e) => return Poll::Ready(Some(Err(e))),
                                 },
-                                Outstanding::Dialogue(_, sender) => {
+                                Outstanding::Dialogue {
+                                    id: _,
+                                    sender,
+                                    meta: _,
+                                } => {
                                     if let Some(e) = send_error(sender, e) {
                                         return Poll::Ready(Some(Err(e)));
                                     }
@@ -223,6 +325,19 @@ pub mod client {
                     DispatchState::Dead => return Poll::Ready(None),
                 }
             }
+        }
+    }
+
+    impl<StreamT, SinkT, RespT, IdT, SendE, RecvE, MetaT, IdI, MethodT, ParamsT> FusedStream
+        for Dispatcher<StreamT, SinkT, RespT, IdT, SendE, RecvE, MetaT, IdI>
+    where
+        StreamT: Stream<Item = DispatchRequest<SendE, RecvE, MethodT, ParamsT, RespT, MetaT>>,
+        SinkT: Sink<template::Request<MethodT, IdT, ParamsT>, Error = SendE>,
+        IdI: Iterator<Item = IdT>,
+        IdT: Clone,
+    {
+        fn is_terminated(&self) -> bool {
+            matches!(self.state, DispatchState::Dead)
         }
     }
 
@@ -303,191 +418,6 @@ pub mod client {
     enum React<D, I> {
         Dispatched(D),
         Incoming(I),
-    }
-
-    pub struct Service<SinkT, StreamT> {
-        sink: Arc<AsyncMutex<SinkT>>,
-        stream: Arc<AsyncMutex<StreamT>>,
-        id: AtomicU32,
-    }
-
-    impl<MethodT, RequestParametersT, SinkT, StreamT, ValueT, ValueE, StringE, StreamE>
-        tower_service::Service<(MethodT, RequestParametersT)> for &Service<SinkT, StreamT>
-    where
-        SinkT: Sink<template::Request<MethodT, u32, RequestParametersT>>,
-        StreamT: Stream<Item = Result<template::Response<ValueT, ValueE, StringE, u32>, StreamE>>,
-    {
-        type Response = template::Result;
-        type Error = Either<SinkT::Error, StreamE>;
-        type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
-
-        fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-            Poll::Ready(Ok(()))
-        }
-
-        fn call(&mut self, req: (MethodT, RequestParametersT)) -> Self::Future {
-            todo!()
-        }
-    }
-
-    pub enum TransportError {}
-
-    pub struct Client {}
-
-    async fn executor<ClientT, SinkT, MethodT, RequestParametersT, IdI, IdT, ResponseT>(
-        client: ClientT,
-        mut ids: IdI,
-        sink: SinkT,
-    ) where
-        ClientT: Stream<
-            Item = (
-                MethodT,
-                Option<RequestParametersT>,
-                Option<oneshot::Sender<Result<ResponseT, SinkT::Error>>>,
-            ),
-        >,
-        SinkT: Sink<template::Request<MethodT, IdT, RequestParametersT>>,
-        IdI: Iterator<Item = IdT>,
-    {
-        let mut client = pin!(client);
-        let mut sink = pin!(sink);
-        while let Some((method, params, sender)) = client.next().await {
-            match sender {
-                Some(sender) => match ids.next() {
-                    Some(id) => todo!(),
-                    None => continue, // we've run out of IDs! skip
-                },
-                None => {
-                    let _ = sink
-                        .feed(template::Request {
-                            method,
-                            params,
-                            id: None,
-                        })
-                        .await;
-                }
-            }
-        }
-        todo!()
-    }
-
-    pin_project! {
-    struct _Reactor<StreamT, P> {
-        #[pin]
-        stream: StreamT,
-        map: P,
-    }}
-
-    struct Pruner<P> {
-        map: P,
-    }
-
-    impl<StreamT, P> _Reactor<StreamT, P> {
-        pub fn new(stream: StreamT, map: P) -> Self {
-            Self { stream, map }
-        }
-    }
-
-    impl<StreamT, P, ValueT, ValueE, StringE, IdT, StreamE> Stream for _Reactor<StreamT, P>
-    where
-        StreamT: Stream<Item = Result<template::Response<ValueT, ValueE, StringE, IdT>, StreamE>>,
-        P: Deref<
-            Target = Mutex<
-                HashMap<IdT, oneshot::Sender<template::Result<ValueT, ValueE, StringE>>>,
-            >,
-        >,
-        IdT: Hash + Eq,
-    {
-        type Item = ReactorError<StreamE, ValueT, ValueE, StringE, IdT>;
-
-        fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-            let mut this = self.project();
-            loop {
-                let next = ready!(this.stream.as_mut().poll_next(cx));
-                match next {
-                    Some(Ok(template::Response { result, id })) => {
-                        match this.map.lock().expect("poisoned lock").remove(&id) {
-                            Some(sender) => match sender.send(result) {
-                                Ok(()) => continue,
-                                Err(result) => {
-                                    return Poll::Ready(Some(ReactorError::Hangup(
-                                        template::Response { result, id },
-                                    )))
-                                }
-                            },
-                            None => {
-                                return Poll::Ready(Some(ReactorError::NoSuchId(
-                                    template::Response { result, id },
-                                )))
-                            }
-                        }
-                    }
-                    Some(Err(e)) => return Poll::Ready(Some(ReactorError::Incoming(e))),
-                    None => return Poll::Ready(None),
-                }
-            }
-        }
-    }
-
-    pin_project! {
-    /// Stream adapter which assigns IDs to JSON-RPC requests.
-    pub struct AssignId<StreamT, IdI, P> {
-        #[pin]
-        stream: StreamT,
-        map: P,
-        running_id: IdI,
-    }}
-
-    impl<StreamT, IdI, P> AssignId<StreamT, IdI, P> {
-        /// `running_id` MUST be an infinite iterator.
-        pub fn new(stream: StreamT, running_id: IdI, map: P) -> Self {
-            Self {
-                stream,
-                map,
-                running_id,
-            }
-        }
-    }
-
-    impl<StreamT, IdI, P, MethodT, RequestParametersT, IdT, V, S> Stream for AssignId<StreamT, IdI, P>
-    where
-        StreamT: Stream<Item = (Option<V>, MethodT, Option<RequestParametersT>)>,
-        P: Deref<Target = Mutex<HashMap<IdT, V, S>>>,
-        IdI: Iterator<Item = IdT>,
-        IdT: Clone + Hash + Eq,
-        S: BuildHasher,
-    {
-        type Item = template::Request<MethodT, IdT, RequestParametersT>;
-
-        fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-            let this = self.project();
-            let inner = ready!(this.stream.poll_next(cx));
-            Poll::Ready(inner.map(|(sender, method, params)| {
-                template::Request {
-                    method,
-                    params,
-                    id: match sender {
-                        Some(v) => {
-                            let id = this.running_id.next().expect("out of IDs");
-                            // if there was already an outstanding ID,
-                            // there could be miscorrelation
-                            this.map
-                                .lock()
-                                .expect("poisoned lock")
-                                .insert(id.clone(), v);
-                            Some(id)
-                        }
-                        None => None,
-                    },
-                }
-            }))
-        }
-    }
-
-    pub enum ReactorError<IncomingE, ValueT = Value, ValueE = Value, StringE = String, IdT = Id> {
-        NoSuchId(template::Response<ValueT, ValueE, StringE, IdT>),
-        Hangup(template::Response<ValueT, ValueE, StringE, IdT>),
-        Incoming(IncomingE),
     }
 }
 
