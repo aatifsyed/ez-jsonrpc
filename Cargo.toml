@@ -26,6 +26,7 @@ futures-util = { version = "0.3.31", default-features = false, features = [
 pin-project-lite = "0.2.15"
 futures-channel = { version = "0.3.31", features = ["alloc"] }
 either = { version = "1.13.0", default-features = false }
+fsmentry = { version = "0.2.0", default-features = false, features = ["macros"] }
 
 [workspace.package]
 edition = "2021"
@@ -36,8 +37,15 @@ homepage = "https://crates.io/crates/ez-jsonrpc"
 description = "JSON-RPC 2.0 made easy!"
 
 [dev-dependencies]
+anyhow = "1.0.91"
+bytes = "1.8.0"
 futures = "0.3.31"
+serde_json = { version = "1.0.132", features = ["raw_value"] }
 tap = "1.0.1"
+tokio = { version = "1.41.0", features = ["full"] }
+tokio-tungstenite = "0.24.0"
+tokio-util = { version = "0.7.12", features = ["full"] }
+tower = { version = "0.5.1", features = ["util"] }
 
 [workspace]
 members = ["_doctest", "macros", "types"]
