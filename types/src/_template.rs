@@ -1,10 +1,10 @@
 use crate::map::Map;
 use serde::{
-    de::{self, Error as _, Unexpected},
-    Deserialize, Serialize,
+    de::{self, Error as _},
+    Deserialize, Deserializer, Serialize, Serializer,
 };
 use serde_json::{Number, Value};
-use std::{borrow::Cow, fmt, hash::Hash, ops::RangeInclusive, str::FromStr};
+use std::{fmt, hash::Hash, ops::RangeInclusive, str::FromStr};
 
 /// A `JSON-RPC 2.0` request object.
 ///
@@ -116,25 +116,25 @@ impl<T> Request<T> {
 struct V2;
 
 impl<'de> Deserialize<'de> for V2 {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        struct SerdeCow<'a>(#[serde(borrow)] Cow<'a, str>);
-        let SerdeCow(cow) = SerdeCow::deserialize(deserializer)?;
-        match &*cow {
-            "2.0" => Ok(Self),
-            other => Err(D::Error::invalid_value(Unexpected::Str(other), &"2.0")),
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl de::Visitor<'_> for Visitor {
+            type Value = V2;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("the string `2.0`")
+            }
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                (v == "2.0")
+                    .then_some(V2)
+                    .ok_or_else(|| E::invalid_value(de::Unexpected::Str(v), &"2.0"))
+            }
         }
+        deserializer.deserialize_str(Visitor)
     }
 }
 
 impl Serialize for V2 {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str("2.0")
     }
 }
