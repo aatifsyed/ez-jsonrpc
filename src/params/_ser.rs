@@ -1,7 +1,8 @@
-use crate::types::{map::Map, RequestParameters};
+use crate::types::RequestParameters;
 use core::fmt::{self, Display};
 use serde::ser::{Error as _, Impossible, Serialize};
 use serde_json::{to_value, Value};
+use std::collections::BTreeMap;
 
 type Result<T, E = Error> = std::result::Result<T, E>;
 
@@ -150,7 +151,7 @@ impl serde::Serializer for Serializer {
     where
         T: ?Sized + Serialize,
     {
-        let mut values = Map::new();
+        let mut values = BTreeMap::new();
         values.insert(String::from(variant), tri!(to_value(value)));
         Ok(RequestParameters::ByName(values))
     }
@@ -201,7 +202,7 @@ impl serde::Serializer for Serializer {
 
     fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap> {
         Ok(SerializeMap::Map {
-            map: Map::new(),
+            map: BTreeMap::new(),
             next_key: None,
         })
     }
@@ -242,7 +243,7 @@ pub struct SerializeTupleVariant {
 
 pub enum SerializeMap {
     Map {
-        map: Map<Value>,
+        map: BTreeMap<String, Value>,
         next_key: Option<String>,
     },
 }
@@ -314,7 +315,7 @@ impl serde::ser::SerializeTupleVariant for SerializeTupleVariant {
     }
 
     fn end(self) -> Result<Self::Ok> {
-        let mut object = Map::new();
+        let mut object = BTreeMap::new();
 
         object.insert(self.name, Value::Array(self.vec));
 
@@ -588,7 +589,7 @@ impl serde::ser::SerializeStructVariant for SerializeStructVariant {
     }
 
     fn end(self) -> Result<Self::Ok> {
-        let mut object = Map::new();
+        let mut object = BTreeMap::new();
 
         object.insert(self.name, Value::Object(self.map));
 

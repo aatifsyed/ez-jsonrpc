@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     fmt::Debug,
     panic::{self, UnwindSafe},
 };
@@ -209,7 +210,7 @@ fn de_named<T: for<'de> DeNamed<'de> + PartialEq + Debug>(src: Value, expected: 
 
 #[track_caller]
 fn ser_named<T: SerNamed + PartialEq + Debug>(src: T, expected: Value) {
-    let expected = ez_jsonrpc::types::Map::from(unwrap_object(expected));
+    let expected = BTreeMap::from_iter(unwrap_object(expected));
     let serialized = T::ser_named(&src, params::ser::ByName::new()).expect("failed to deserialize");
     assert_eq!(serialized, expected);
 }

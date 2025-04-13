@@ -6,8 +6,8 @@ pub mod types {
 }
 
 pub use types::{
-    Error, Id, Map, MaybeBatchedRequest, MaybeBatchedResponse, Request, RequestParameters,
-    Response, Result,
+    Error, Id, MaybeBatchedRequest, MaybeBatchedResponse, Request, RequestParameters, Response,
+    Result,
 };
 
 pub mod server;

@@ -1,10 +1,9 @@
-use crate::map::Map;
 use serde::{
     de::{self, Error as _},
     Deserialize, Deserializer, Serialize, Serializer,
 };
 use serde_json::{Number, Value};
-use std::{fmt, hash::Hash, ops::RangeInclusive, str::FromStr};
+use std::{collections::BTreeMap, fmt, hash::Hash, ops::RangeInclusive, str::FromStr};
 
 /// A `JSON-RPC 2.0` request object.
 ///
@@ -153,7 +152,7 @@ pub enum RequestParameters<ValueT = Value> {
     /// > expected parameter names.
     /// > The absence of expected names MAY result in an error being generated.
     /// > The names MUST match exactly, including case, to the method's expected parameters.
-    ByName(Map<ValueT>),
+    ByName(BTreeMap<String, ValueT>),
 }
 
 impl<T> RequestParameters<T> {

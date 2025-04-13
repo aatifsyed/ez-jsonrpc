@@ -11,8 +11,6 @@
 
 use serde_json::{Number, Value};
 
-pub mod map;
-
 /// Generic structs where you can customize, e.g zerocopy deserialization.
 ///
 /// You SHOULD take care that your custom types also match the specification when (de)serialized
@@ -137,10 +135,6 @@ pub type Id = template::Id;
 ///
 /// See [`template::Response`] for specification wording.
 pub type Response = template::Response;
-/// A map from strings to JSON [`Value`]s.
-///
-/// Like [`serde_json::Map`], can be configured to preserve ordering at compile time.
-pub type Map = map::Map;
 /// JSON-RPC 2.0 Error object.
 ///
 /// ```
@@ -187,23 +181,6 @@ pub type MaybeBatchedRequest = template::MaybeBatchedRequest;
 pub type MaybeBatchedResponse = template::MaybeBatchedResponse;
 /// Result type where [`Err`] is a JSON-RPC 2.0 [`Error`].
 pub type Result<T = Value> = template::Result<T>;
-
-impl From<serde_json::Map<String, Value>> for Map {
-    fn from(value: serde_json::Map<String, Value>) -> Self {
-        value.into_iter().collect()
-    }
-}
-impl From<Map> for serde_json::Map<String, Value> {
-    fn from(value: Map) -> Self {
-        value.into_iter().collect()
-    }
-}
-
-impl<const N: usize> From<[(String, Value); N]> for Map {
-    fn from(value: [(String, Value); N]) -> Self {
-        Self::from_iter(value)
-    }
-}
 
 impl From<Number> for Id {
     fn from(value: Number) -> Self {

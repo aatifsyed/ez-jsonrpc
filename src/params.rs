@@ -18,7 +18,8 @@ pub use {
 };
 
 pub mod ser {
-    use ez_jsonrpc_types::Map;
+    use std::collections::BTreeMap;
+
     use serde::ser::{SerializeMap, SerializeSeq};
     use serde_json::Value;
 
@@ -61,7 +62,7 @@ pub mod ser {
     /// [`RequestParameters::ByName`](crate::types::RequestParameters::ByName).
     #[derive(Debug, Default, Clone)]
     pub struct ByName {
-        map: Map,
+        map: BTreeMap<String, Value>,
         next_key: Option<String>,
     }
 
@@ -69,16 +70,10 @@ pub mod ser {
         pub fn new() -> Self {
             Self::default()
         }
-        pub fn with_capacity(capacity: usize) -> Self {
-            Self {
-                map: Map::with_capacity(capacity),
-                next_key: None,
-            }
-        }
     }
 
     impl SerializeMap for ByName {
-        type Ok = Map;
+        type Ok = BTreeMap<String, Value>;
         type Error = serde_json::Error;
 
         fn serialize_key<T>(&mut self, key: &T) -> Result<(), Self::Error>
@@ -252,10 +247,13 @@ mod tests {
                 name: "string".into(),
                 count: 1,
             },
-            RequestParameters::ByName(crate::types::Map::from_iter([
-                (String::from("name"), json!("string")),
-                (String::from("count"), json!(1)),
-            ])),
+            RequestParameters::ByName(
+                [
+                    (String::from("name"), json!("string")),
+                    (String::from("count"), json!(1)),
+                ]
+                .into(),
+            ),
         );
     }
 }
