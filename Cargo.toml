@@ -29,4 +29,4 @@ homepage = "https://crates.io/crates/ez-jsonrpc"
 description = "JSON-RPC 2.0 made easy!"
 
 [workspace]
-members = [ "_doctest","macros", "types"]
+members = [ "_doctest", "ez-client","macros", "types"]
