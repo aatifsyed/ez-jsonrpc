@@ -19,6 +19,12 @@ tower-layer = "0.3.3"
 tower-service = "0.3.3"
 futures-util = { version = "0.3.31", default-features = false }
 pin-project-lite = "0.2.15"
+ez-client = { path = "ez-client", version = "0.1.0" }
+futures-channel = { version = "0.3.31", default-features = false, features = [
+    "std",
+] }
+pin-project = "1.1.10"
+tower-util = { version = "0.3.1", default-features = false }
 
 [workspace.package]
 edition = "2021"

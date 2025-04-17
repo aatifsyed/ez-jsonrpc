@@ -44,15 +44,6 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
-macro_rules! mermaid {
-    ($($tt:tt)*) => {
-        core::stringify!($($tt)*)
-    };
-}
-
-#[doc = mermaid!(hello world)]
-pub const DOCME: () = {};
-
 extern crate alloc;
 
 use core::{
@@ -72,11 +63,22 @@ use hashbrown::HashMap;
 use pin_project::pin_project;
 
 /// Implementor of [`Service`](tower_service::Service) which dispatches to a [`Task`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug)]
 pub struct Service<SinkT, ResponseT, TransportE, TimeoutFut, TimeoutE> {
     /// The sink over which to communicate with the [`Task`].
     pub sink: SinkT,
     pub phantom: PhantomDisown<(ResponseT, TransportE, TimeoutFut, TimeoutE)>,
+}
+
+impl<SinkT: Clone, ResponseT, TransportE, TimeoutFut, TimeoutE> Clone
+    for Service<SinkT, ResponseT, TransportE, TimeoutFut, TimeoutE>
+{
+    fn clone(&self) -> Self {
+        Self {
+            sink: self.sink.clone(),
+            phantom: PhantomDisown::new(),
+        }
+    }
 }
 
 impl<SinkT, ResponseT, TransportE, TimeoutFut, TimeoutE>
@@ -470,6 +472,7 @@ pub trait IdFactory {
 ///
 /// [`Task`]s are driven as a [`Stream`] of [`task::Error`]s.
 #[pin_project]
+#[derive(Debug)]
 pub struct Task<
     IdT,
     ResponseT,
@@ -595,6 +598,7 @@ mod sink_state {
     use super::*;
 
     fsmentry::fsmentry! {
+    #[derive(Debug)]
     #[fsmentry(entry = pub(crate) Entry)]
     pub(crate) enum State<IdT, ResponseT, TransportE, TimeoutFut, TimeoutE> {
         Flushing((

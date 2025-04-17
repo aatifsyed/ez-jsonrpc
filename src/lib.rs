@@ -10,6 +10,7 @@ pub use types::{
     Result,
 };
 
+pub mod client;
 pub mod server;
 
 #[doc(hidden)]
