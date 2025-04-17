@@ -19,7 +19,7 @@ tower-layer = "0.3.3"
 tower-service = "0.3.3"
 futures-util = { version = "0.3.31", default-features = false }
 pin-project-lite = "0.2.15"
-ez-client = { path = "ez-client", version = "0.1.0" }
+speakeasy = { path = "speakeasy", version = "0.1.0" }
 futures-channel = { version = "0.3.31", default-features = false, features = [
     "std",
 ] }
@@ -35,4 +35,4 @@ homepage = "https://crates.io/crates/ez-jsonrpc"
 description = "JSON-RPC 2.0 made easy!"
 
 [workspace]
-members = ["_doctest", "ez-client", "macros", "types"]
+members = ["_doctest", "speakeasy", "macros", "types"]

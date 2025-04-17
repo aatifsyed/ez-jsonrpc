@@ -77,27 +77,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
 
 [[package]]
-name = "ez-client"
-version = "0.1.0"
-dependencies = [
- "fsmentry",
- "futures",
- "futures-channel",
- "futures-core",
- "futures-sink",
- "futures-util",
- "hashbrown 0.15.2",
- "pin-project 1.1.10",
- "thiserror",
- "tower",
- "tower-service",
-]
-
-[[package]]
 name = "ez-jsonrpc"
 version = "0.4.0"
 dependencies = [
- "ez-client",
  "ez-jsonrpc-macros",
  "ez-jsonrpc-types",
  "futures-channel",
@@ -107,6 +89,7 @@ dependencies = [
  "ryu",
  "serde",
  "serde_json",
+ "speakeasy",
  "tower-layer",
  "tower-service",
  "tower-util",
@@ -428,6 +411,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f92a496fb766b417c996b9c5e57daf2f7ad3b0bebe1ccfca4856390e3d3bb67"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "speakeasy"
+version = "0.1.0"
+dependencies = [
+ "fsmentry",
+ "futures",
+ "futures-channel",
+ "futures-core",
+ "futures-sink",
+ "futures-util",
+ "hashbrown 0.15.2",
+ "pin-project 1.1.10",
+ "thiserror",
+ "tower",
+ "tower-service",
 ]
 
 [[package]]

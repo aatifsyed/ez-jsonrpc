@@ -9,11 +9,11 @@ use core::{
 
 use std::hash::RandomState;
 
-use ez_client::{Dialogue, ErrorFactory, IdFactory, Notification};
 use ez_jsonrpc_types::template;
 use futures_channel::mpsc;
 use futures_util::{stream::FusedStream, Sink, Stream};
 use pin_project::pin_project;
+use speakeasy::{Dialogue, ErrorFactory, IdFactory, Notification};
 use tower_util::ServiceExt as _;
 
 #[expect(clippy::type_complexity)]
@@ -70,8 +70,8 @@ where
     ErrFact: ErrorFactory<Error = TransportT::Error>,
 {
     let (from_client, to_task) = mpsc::channel(buffer);
-    let client = Client(ez_client::Service::new(from_client));
-    let task = Task(ez_client::Task::new(
+    let client = Client(speakeasy::Service::new(from_client));
+    let task = Task(speakeasy::Task::new(
         to_task,
         Adapt(transport),
         id_factory,
@@ -92,9 +92,9 @@ pub struct Client<
     StringE = String,
 >(
     #[expect(clippy::type_complexity)]
-    ez_client::Service<
+    speakeasy::Service<
         mpsc::Sender<
-            ez_client::Ask<
+            speakeasy::Ask<
                 (MethodT, Option<RequestParametersT>),
                 template::Result<ValueT, ValueE, StringE>,
                 TransportE,
@@ -135,9 +135,9 @@ impl<TransportE, TimeoutFut, TimeoutE, MethodT, RequestParametersT, ValueT, Valu
         method: MethodT,
         params: Option<RequestParametersT>,
     ) -> tower_util::Oneshot<
-        ez_client::Service<
+        speakeasy::Service<
             mpsc::Sender<
-                ez_client::Ask<
+                speakeasy::Ask<
                     (MethodT, Option<RequestParametersT>),
                     Result<ValueT, template::Error<ValueE, StringE>>,
                     TransportE,
@@ -161,9 +161,9 @@ impl<TransportE, TimeoutFut, TimeoutE, MethodT, RequestParametersT, ValueT, Valu
         params: Option<RequestParametersT>,
         timeout: TimeoutFut,
     ) -> tower_util::Oneshot<
-        ez_client::Service<
+        speakeasy::Service<
             mpsc::Sender<
-                ez_client::Ask<
+                speakeasy::Ask<
                     (MethodT, Option<RequestParametersT>),
                     Result<ValueT, template::Error<ValueE, StringE>>,
                     TransportE,
@@ -204,11 +204,11 @@ pub struct Task<
     BuildHasherT = RandomState,
 >(
     #[expect(clippy::type_complexity)]
-    ez_client::Task<
+    speakeasy::Task<
         IdT,
         template::Result<ValueT, ValueE, StringE>,
         mpsc::Receiver<
-            ez_client::Ask<
+            speakeasy::Ask<
                 (MethodT, Option<RequestParametersT>),
                 template::Result<ValueT, ValueE, StringE>,
                 TransportE,
