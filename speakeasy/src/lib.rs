@@ -47,8 +47,9 @@
 extern crate alloc;
 
 use core::{
+    cmp, fmt,
     future::Future,
-    hash::{BuildHasher, Hash},
+    hash::{BuildHasher, Hash, Hasher},
     mem,
     pin::{pin, Pin},
     task::{Context, Poll},
@@ -63,11 +64,21 @@ use hashbrown::HashMap;
 use pin_project::pin_project;
 
 /// Implementor of [`Service`](tower_service::Service) which dispatches to a [`Task`].
-#[derive(Debug)]
 pub struct Service<SinkT, ResponseT, TransportE, TimeoutFut, TimeoutE> {
     /// The sink over which to communicate with the [`Task`].
     pub sink: SinkT,
     pub phantom: PhantomDisown<(ResponseT, TransportE, TimeoutFut, TimeoutE)>,
+}
+
+impl<SinkT: fmt::Debug, ResponseT, TransportE, TimeoutFut, TimeoutE> fmt::Debug
+    for Service<SinkT, ResponseT, TransportE, TimeoutFut, TimeoutE>
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Service")
+            .field("sink", &self.sink)
+            .field("phantom", &self.phantom)
+            .finish()
+    }
 }
 
 impl<SinkT: Clone, ResponseT, TransportE, TimeoutFut, TimeoutE> Clone
@@ -225,13 +236,98 @@ pub mod notification {
 
 /// Indicate to a [`Service`] that the [`Task`] should assign
 /// an ID, and wait for a response until the [timeout](Self::timeout).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Dialogue<RequestT, ResponseT, TimeoutFut> {
     /// The request to send to the underlying transport.
     pub request: RequestT,
     /// Stop listening for a response and return this as an error.
     pub timeout: TimeoutFut,
     pub response: PhantomDisown<ResponseT>,
+}
+
+impl<RequestT: PartialOrd, ResponseT, TimeoutFut: PartialOrd> PartialOrd
+    for Dialogue<RequestT, ResponseT, TimeoutFut>
+{
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        let Self {
+            request,
+            timeout,
+            response,
+        } = self;
+        match request.partial_cmp(&other.request) {
+            Some(cmp::Ordering::Equal) => {}
+            ord => return ord,
+        }
+        match timeout.partial_cmp(&other.timeout) {
+            Some(cmp::Ordering::Equal) => {}
+            ord => return ord,
+        }
+        response.partial_cmp(&other.response)
+    }
+}
+
+impl<RequestT: Ord, ResponseT, TimeoutFut: Ord> Ord for Dialogue<RequestT, ResponseT, TimeoutFut> {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        let Self {
+            request,
+            timeout,
+            response,
+        } = self;
+        request
+            .cmp(&other.request)
+            .then_with(|| timeout.cmp(&other.timeout))
+            .then_with(|| response.cmp(&other.response))
+    }
+}
+
+impl<RequestT: Hash, ResponseT, TimeoutFut: Hash> Hash
+    for Dialogue<RequestT, ResponseT, TimeoutFut>
+{
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.request.hash(state);
+        self.timeout.hash(state);
+        self.response.hash(state);
+    }
+}
+
+impl<RequestT: PartialEq, ResponseT, TimeoutFut: PartialEq> PartialEq
+    for Dialogue<RequestT, ResponseT, TimeoutFut>
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.request == other.request
+            && self.timeout == other.timeout
+            && self.response == other.response
+    }
+}
+
+impl<RequestT: Eq, ResponseT, TimeoutFut: Eq> Eq for Dialogue<RequestT, ResponseT, TimeoutFut> {}
+
+impl<RequestT: Copy, ResponseT, TimeoutFut: Copy> Copy
+    for Dialogue<RequestT, ResponseT, TimeoutFut>
+{
+}
+
+impl<RequestT: Clone, ResponseT, TimeoutFut: Clone> Clone
+    for Dialogue<RequestT, ResponseT, TimeoutFut>
+{
+    fn clone(&self) -> Self {
+        Self {
+            request: self.request.clone(),
+            timeout: self.timeout.clone(),
+            response: self.response,
+        }
+    }
+}
+
+impl<RequestT: fmt::Debug, ResponseT, TimeoutFut: fmt::Debug> fmt::Debug
+    for Dialogue<RequestT, ResponseT, TimeoutFut>
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Dialogue")
+            .field("request", &self.request)
+            .field("timeout", &self.timeout)
+            .field("response", &self.response)
+            .finish()
+    }
 }
 
 impl<RequestT, ResponseT, TimeoutFut> Dialogue<RequestT, ResponseT, TimeoutFut> {
@@ -405,7 +501,6 @@ pub mod dialogue {
 }
 
 /// Application-level input to a [`Task`].
-#[derive(Debug)]
 pub struct Ask<RequestT, ResponseT, TransportE, TimeoutFut, TimeoutE> {
     /// The outgoing request.
     pub request: RequestT,
@@ -418,6 +513,18 @@ pub struct Ask<RequestT, ResponseT, TransportE, TimeoutFut, TimeoutE> {
     pub kind: ask::Kind<ResponseT, TransportE, TimeoutFut, TimeoutE>,
 }
 
+impl<RequestT: fmt::Debug, ResponseT, TransportE, TimeoutFut: fmt::Debug, TimeoutE> fmt::Debug
+    for Ask<RequestT, ResponseT, TransportE, TimeoutFut, TimeoutE>
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Ask")
+            .field("request", &self.request)
+            .field("sent", &self.sent)
+            .field("kind", &self.kind)
+            .finish()
+    }
+}
+
 /// Contains [`ask::Kind`].
 pub mod ask {
     use super::*;
@@ -425,7 +532,6 @@ pub mod ask {
     /// The representation of a [`Notification`] or [`Dialogue`].
     ///
     /// See [`Ask::kind`].
-    #[derive(Debug)]
     pub enum Kind<ResponseT, TransportE, TimeoutFut, TimeoutE> {
         /// The caller doesn't listen for a response, and an ID is not assigned.
         Notification,
@@ -434,6 +540,21 @@ pub mod ask {
             response: oneshot::Sender<Result<ResponseT, Either<TransportE, TimeoutE>>>,
             timeout: TimeoutFut,
         },
+    }
+
+    impl<ResponseT, TransportE, TimeoutFut: fmt::Debug, TimeoutE> fmt::Debug
+        for Kind<ResponseT, TransportE, TimeoutFut, TimeoutE>
+    {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match self {
+                Self::Notification => write!(f, "Notification"),
+                Self::Dialogue { response, timeout } => f
+                    .debug_struct("Dialogue")
+                    .field("response", response)
+                    .field("timeout", timeout)
+                    .finish(),
+            }
+        }
     }
 }
 
