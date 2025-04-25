@@ -1,6 +1,6 @@
 use core::{fmt, hash::Hash, marker::PhantomData, ops::RangeInclusive, str::FromStr};
 use serde::{
-    de::{self, Error as _},
+    de::{self, value::UnitDeserializer, Error as _},
     Deserialize, Deserializer, Serialize, Serializer,
 };
 use serde_json::{Number, Value};
@@ -353,7 +353,6 @@ where
             )),
             (None, None) => Err(D::Error::custom("must have an `error` or `result` member")),
 
-            // we expect this case to error
             (Some(None), None) => Ok(Response {
                 result: Ok(ValueT::deserialize(
                     serde::de::value::UnitDeserializer::new(),
@@ -639,11 +638,17 @@ impl<
                 result: Ok(res),
                 id,
             })),
+            (None, None, Some(id), Some(None), None) => Ok(Self::Response(Response {
+                result: Ok(Deserialize::deserialize(UnitDeserializer::new())?),
+                id,
+            })),
             (None, None, Some(id), None, Some(err)) => Ok(Self::Response(Response {
                 result: Err(err),
                 id,
             })),
-            _ => Err(serde::de::Error::custom("bad field set")),
+            _ => Err(serde::de::Error::custom(
+                "bad field set: `method` (possibly with `params`), `result` and `error` are mutually exclusive",
+            )),
         }
     }
 }
