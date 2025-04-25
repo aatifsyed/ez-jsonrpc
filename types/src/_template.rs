@@ -1,6 +1,12 @@
 use core::{fmt, hash::Hash, marker::PhantomData, ops::RangeInclusive, str::FromStr};
 use serde::{
-    de::{self, value::UnitDeserializer, Error as _},
+    de::{
+        self,
+        value::{
+            EnumAccessDeserializer, MapAccessDeserializer, SeqAccessDeserializer, UnitDeserializer,
+        },
+        Error as _,
+    },
     Deserialize, Deserializer, Serialize, Serializer,
 };
 use serde_json::{Number, Value};
@@ -160,7 +166,7 @@ impl<'de, ValueT: Deserialize<'de>> Deserialize<'de> for RequestParameters<Value
             type Value = RequestParameters<ValueT>;
             fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
                 f.write_str(
-                    "An Array for by-position parameters, or an Object of by-name parameters",
+                    "An Array of by-position parameters, or an Object of by-name parameters",
                 )
             }
             fn visit_map<A: de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
@@ -554,26 +560,123 @@ where
 {
 }
 
-#[derive(Serialize, Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(
-    untagged,
-    expecting = "a single response object, or an Array of batched response objects"
-)]
 /// A response to a [`MaybeBatchedRequest`].
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(untagged)]
 pub enum MaybeBatchedResponse<ValueT = Value, ValueE = Value, StringE = String, IdT = Id> {
     Single(Response<ValueT, ValueE, StringE, IdT>),
     Batch(Vec<Response<ValueT, ValueE, StringE, IdT>>),
 }
 
+impl<
+        'de,
+        ValueT: Deserialize<'de>,
+        ValueE: Deserialize<'de>,
+        StringE: Deserialize<'de>,
+        IdT: Deserialize<'de>,
+    > Deserialize<'de> for MaybeBatchedResponse<ValueT, ValueE, StringE, IdT>
+{
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Visitor<'de, ValueT, ValueE, StringE, IdT>(
+            #[expect(clippy::type_complexity)]
+            PhantomData<fn() -> (&'de (), ValueT, ValueE, StringE, IdT)>,
+        );
+        impl<
+                'de,
+                ValueT: Deserialize<'de>,
+                ValueE: Deserialize<'de>,
+                StringE: Deserialize<'de>,
+                IdT: Deserialize<'de>,
+            > de::Visitor<'de> for Visitor<'de, ValueT, ValueE, StringE, IdT>
+        {
+            type Value = MaybeBatchedResponse<ValueT, ValueE, StringE, IdT>;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a single response object, or an Array of batched response objects")
+            }
+            fn visit_newtype_struct<D: Deserializer<'de>>(
+                self,
+                d: D,
+            ) -> Result<Self::Value, D::Error> {
+                d.deserialize_any(self)
+            }
+            fn visit_seq<A: de::SeqAccess<'de>>(self, seq: A) -> Result<Self::Value, A::Error> {
+                Ok(MaybeBatchedResponse::Batch(Deserialize::deserialize(
+                    SeqAccessDeserializer::new(seq),
+                )?))
+            }
+            fn visit_map<A: de::MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+                Ok(MaybeBatchedResponse::Single(Deserialize::deserialize(
+                    MapAccessDeserializer::new(map),
+                )?))
+            }
+
+            fn visit_enum<A: de::EnumAccess<'de>>(self, data: A) -> Result<Self::Value, A::Error> {
+                Ok(MaybeBatchedResponse::Single(Deserialize::deserialize(
+                    EnumAccessDeserializer::new(data),
+                )?))
+            }
+        }
+        d.deserialize_map(Visitor(PhantomData))
+    }
+}
+
 /// > To send several Request objects at the same time, the Client MAY send an Array filled with Request objects.
-#[derive(Serialize, Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(
-    untagged,
-    expecting = "a single request object, or an Array of batched request objects"
-)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(untagged)]
 pub enum MaybeBatchedRequest<MethodT = String, IdT = Id, RequestParametersT = RequestParameters> {
     Single(Request<MethodT, IdT, RequestParametersT>),
     Batch(Vec<Request<MethodT, IdT, RequestParametersT>>),
+}
+
+impl<
+        'de,
+        MethodT: Deserialize<'de>,
+        IdT: Deserialize<'de>,
+        RequestParametersT: Deserialize<'de>,
+    > Deserialize<'de> for MaybeBatchedRequest<MethodT, IdT, RequestParametersT>
+{
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[expect(clippy::type_complexity)]
+        struct Visitor<MethodT, IdT, RequestParametersT>(
+            PhantomData<fn() -> (MethodT, IdT, RequestParametersT)>,
+        );
+
+        impl<
+                'de,
+                MethodT: Deserialize<'de>,
+                IdT: Deserialize<'de>,
+                RequestParametersT: Deserialize<'de>,
+            > de::Visitor<'de> for Visitor<MethodT, IdT, RequestParametersT>
+        {
+            type Value = MaybeBatchedRequest<MethodT, IdT, RequestParametersT>;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a single request object, or an array or request objects")
+            }
+            fn visit_newtype_struct<D: Deserializer<'de>>(
+                self,
+                d: D,
+            ) -> Result<Self::Value, D::Error> {
+                d.deserialize_any(self)
+            }
+            fn visit_seq<A: de::SeqAccess<'de>>(self, seq: A) -> Result<Self::Value, A::Error> {
+                Ok(MaybeBatchedRequest::Batch(Deserialize::deserialize(
+                    SeqAccessDeserializer::new(seq),
+                )?))
+            }
+            fn visit_map<A: de::MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+                Ok(MaybeBatchedRequest::Single(Deserialize::deserialize(
+                    MapAccessDeserializer::new(map),
+                )?))
+            }
+
+            fn visit_enum<A: de::EnumAccess<'de>>(self, data: A) -> Result<Self::Value, A::Error> {
+                Ok(MaybeBatchedRequest::Single(Deserialize::deserialize(
+                    EnumAccessDeserializer::new(data),
+                )?))
+            }
+        }
+        d.deserialize_map(Visitor(PhantomData))
+    }
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]

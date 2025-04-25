@@ -181,6 +181,32 @@ pub type MaybeBatchedRequest = template::MaybeBatchedRequest;
 pub type MaybeBatchedResponse = template::MaybeBatchedResponse;
 /// Result type where [`Err`] is a JSON-RPC 2.0 [`Error`].
 pub type Result<T = Value> = template::Result<T>;
+/// A [`Request`] or [`Response`].
+/// ```
+/// # use _doctest::*;
+/// # use ez_jsonrpc_types::*;
+/// assert_roundtrip! {
+///     Message::Request(Request {
+///         method: String::from("hello"),
+///         params: None,
+///         id: Some(Id::from(1)),
+///     }),
+///     {
+///         "jsonrpc": "2.0",
+///         "method": "hello",
+///         "id": 1
+///     };
+///     Message::Response(Response {
+///         result: Ok(json!(null)),
+///         id: Id::from(1),
+///     }),
+///     {
+///         "jsonrpc": "2.0",
+///         "id": 1,
+///         "result": null
+///     };
+/// }
+/// ```
 pub type Message = template::Message;
 
 impl From<Number> for Id {
