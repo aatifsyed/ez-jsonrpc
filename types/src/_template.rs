@@ -1,9 +1,10 @@
+use core::{fmt, hash::Hash, marker::PhantomData, ops::RangeInclusive, str::FromStr};
 use serde::{
     de::{self, Error as _},
     Deserialize, Deserializer, Serialize, Serializer,
 };
 use serde_json::{Number, Value};
-use std::{collections::BTreeMap, fmt, hash::Hash, ops::RangeInclusive, str::FromStr};
+use std::collections::BTreeMap;
 
 /// A `JSON-RPC 2.0` request object.
 ///
@@ -140,11 +141,8 @@ impl Serialize for V2 {
 
 /// > If present, parameters for the rpc call MUST be provided as a Structured value.
 /// > Either by-position through an Array or by-name through an Object.
-#[derive(Serialize, Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(
-    untagged,
-    expecting = "an `Array` of by-position paramaters, or an `Object` of by-name parameters"
-)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(untagged)]
 pub enum RequestParameters<ValueT = Value> {
     /// > params MUST be an Array, containing the values in the Server expected order.
     ByPosition(Vec<ValueT>),
@@ -153,6 +151,35 @@ pub enum RequestParameters<ValueT = Value> {
     /// > The absence of expected names MAY result in an error being generated.
     /// > The names MUST match exactly, including case, to the method's expected parameters.
     ByName(BTreeMap<String, ValueT>),
+}
+
+impl<'de, ValueT: Deserialize<'de>> Deserialize<'de> for RequestParameters<ValueT> {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Visitor<ValueT>(PhantomData<fn() -> ValueT>);
+        impl<'de, ValueT: Deserialize<'de>> serde::de::Visitor<'de> for Visitor<ValueT> {
+            type Value = RequestParameters<ValueT>;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str(
+                    "An Array for by-position parameters, or an Object of by-name parameters",
+                )
+            }
+            fn visit_map<A: de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut by_name = BTreeMap::new();
+                while let Some((k, v)) = map.next_entry()? {
+                    by_name.insert(k, v);
+                }
+                Ok(RequestParameters::ByName(by_name))
+            }
+            fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                let mut by_pos = Vec::new();
+                while let Some(it) = seq.next_element()? {
+                    by_pos.push(it)
+                }
+                Ok(RequestParameters::ByPosition(by_pos))
+            }
+        }
+        d.deserialize_any(Visitor(PhantomData))
+    }
 }
 
 impl<T> RequestParameters<T> {
@@ -174,12 +201,73 @@ impl<T> RequestParameters<T> {
 pub use crate::params::IntoDeserializer;
 
 /// See [`Request::id`].
-#[derive(Serialize, Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
-#[serde(untagged, expecting = "a string, a number, or null")]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq, Hash)]
+#[serde(untagged)]
 pub enum Id<StringT = String, NumberT = Number> {
     String(StringT),
     Number(NumberT),
     Null,
+}
+
+impl<'de, StringT: Deserialize<'de>, NumberT: Deserialize<'de>> Deserialize<'de>
+    for Id<StringT, NumberT>
+{
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::value::*;
+        struct Visitor<StringT, NumberT>(PhantomData<fn() -> (StringT, NumberT)>);
+        macro_rules! fwd_number {
+            ($($method:ident($input:ty) via $deserializer:ident);*$(;)?) => {$(
+                fn $method<E: de::Error>(self, v: $input) -> Result<Self::Value, E> {
+                    Ok(Id::Number(NumberT::deserialize($deserializer::new(v))?))
+                }
+            )*};
+        }
+        impl<'de, StringT: Deserialize<'de>, NumberT: Deserialize<'de>> de::Visitor<'de>
+            for Visitor<StringT, NumberT>
+        {
+            type Value = Id<StringT, NumberT>;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a string, a number, or null")
+            }
+            fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(Id::Null)
+            }
+            fwd_number! {
+                visit_i8(i8) via I8Deserializer;
+                visit_i16(i16) via I16Deserializer;
+                visit_i32(i32) via I32Deserializer;
+                visit_i64(i64) via I64Deserializer;
+                visit_i128(i128) via I128Deserializer;
+
+                visit_u8(u8) via U8Deserializer;
+                visit_u16(u16) via U16Deserializer;
+                visit_u32(u32) via U32Deserializer;
+                visit_u64(u64) via U64Deserializer;
+                visit_u128(u128) via U128Deserializer;
+
+                visit_f32(f32) via F32Deserializer;
+                visit_f64(f64) via F64Deserializer;
+            }
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                Ok(Id::String(StringT::deserialize(StrDeserializer::new(v))?))
+            }
+            fn visit_borrowed_str<E: de::Error>(self, v: &'de str) -> Result<Self::Value, E> {
+                Ok(Id::String(StringT::deserialize(StrDeserializer::new(v))?))
+            }
+            fn visit_string<E: de::Error>(self, v: String) -> Result<Self::Value, E> {
+                Ok(Id::String(StringT::deserialize(StringDeserializer::new(
+                    v,
+                ))?))
+            }
+            fn visit_some<D: Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
+                d.deserialize_any(self)
+            }
+            fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(Id::Null)
+            }
+        }
+        d.deserialize_any(Visitor(PhantomData))
+    }
 }
 
 impl<StringT, NumberT> Default for Id<StringT, NumberT> {
@@ -487,4 +575,75 @@ pub enum MaybeBatchedResponse<ValueT = Value, ValueE = Value, StringE = String, 
 pub enum MaybeBatchedRequest<MethodT = String, IdT = Id, RequestParametersT = RequestParameters> {
     Single(Request<MethodT, IdT, RequestParametersT>),
     Batch(Vec<Request<MethodT, IdT, RequestParametersT>>),
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum Message<
+    MethodT = String,
+    IdT = Id,
+    RequestParametersT = RequestParameters,
+    ValueT = Value,
+    ValueE = ValueT,
+    StringE = String,
+> {
+    Request(Request<MethodT, IdT, RequestParametersT>),
+    Response(Response<ValueT, ValueE, StringE, IdT>),
+}
+
+impl<
+        'de,
+        MethodT: Deserialize<'de>,
+        IdT: Deserialize<'de>,
+        RequestParametersT: Deserialize<'de>,
+        ValueT: Deserialize<'de>,
+        ValueE: Deserialize<'de>,
+        StringE: Deserialize<'de>,
+    > Deserialize<'de> for Message<MethodT, IdT, RequestParametersT, ValueT, ValueE, StringE>
+{
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(bound(deserialize = "
+            IdT: Deserialize<'de>,
+            MethodT: Deserialize<'de>,
+            RequestParametersT: Deserialize<'de>,
+            ValueT: Deserialize<'de>,
+            ValueE: Deserialize<'de>,
+            StringE: Deserialize<'de>,
+        "))]
+        struct _Message<MethodT, IdT, RequestParametersT, ValueT, ValueE, StringE> {
+            jsonrpc: V2,
+            method: Option<MethodT>,
+            params: Option<RequestParametersT>,
+            #[serde(deserialize_with = "deserialize_some", default)]
+            id: Option<IdT>,
+            #[serde(default, deserialize_with = "deserialize_some")]
+            result: Option<Option<ValueT>>,
+            #[serde(default, deserialize_with = "deserialize_some")]
+            error: Option<Error<ValueE, StringE>>,
+        }
+        let _Message {
+            jsonrpc: V2,
+            method,
+            params,
+            id,
+            result,
+            error,
+        } = _Message::deserialize(d)?;
+
+        match (method, params, id, result, error) {
+            (Some(method), params, id, None, None) => {
+                Ok(Self::Request(Request { method, params, id }))
+            }
+            (None, None, Some(id), Some(Some(res)), None) => Ok(Self::Response(Response {
+                result: Ok(res),
+                id,
+            })),
+            (None, None, Some(id), None, Some(err)) => Ok(Self::Response(Response {
+                result: Err(err),
+                id,
+            })),
+            _ => Err(serde::de::Error::custom("bad field set")),
+        }
+    }
 }

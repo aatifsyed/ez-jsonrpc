@@ -181,6 +181,7 @@ pub type MaybeBatchedRequest = template::MaybeBatchedRequest;
 pub type MaybeBatchedResponse = template::MaybeBatchedResponse;
 /// Result type where [`Err`] is a JSON-RPC 2.0 [`Error`].
 pub type Result<T = Value> = template::Result<T>;
+pub type Message = template::Message;
 
 impl From<Number> for Id {
     fn from(value: Number) -> Self {
